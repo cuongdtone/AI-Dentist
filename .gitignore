@@ -1,0 +1,38 @@
+# Dữ liệu (không đưa vào git)
+final_data/
+research/dentex/
+**/data/
+**/datasets/
+
+# Kết quả train / chạy
+**/runs/
+*.log
+
+# Trọng số / model
+*.pt
+*.pth
+*.onnx
+*.engine
+*.npy
+*.cache
+
+# Môi trường Python
+**/env/
+**/venv/
+**/.venv/
+__pycache__/
+*.pyc
+
+# Frontend build
+node_modules/
+dist/
+
+# DB / bí mật / rác
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+.DS_Store
+.ipynb_checkpoints/

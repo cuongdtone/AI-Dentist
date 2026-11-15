@@ -1,0 +1,20 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./backend/models:/app/models:ro   # export lại model không cần build lại image
+      - app-data:/data                     # SQLite + ảnh đã upload
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "${PORT:-8080}:80"
+    depends_on: [backend]
+    restart: unless-stopped
+volumes:
+  app-data:
