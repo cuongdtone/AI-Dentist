@@ -1,0 +1,7 @@
+{
+  "depth_a": 0.05,
+  "cej_frac": 0.35,
+  "impact_depth": 0.19,
+  "angle_thr": 20.0,
+  "min_elong": 1.15
+}

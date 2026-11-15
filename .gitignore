@@ -36,3 +36,9 @@ dist/
 !.env.example
 .DS_Store
 .ipynb_checkpoints/
+
+# wisdom-analysis: kết quả sinh ra
+research/wisdom-analysis/review/
+research/wisdom-analysis/out_*/
+research/wisdom-analysis/features_*.csv
+review_result.json

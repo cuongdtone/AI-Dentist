@@ -14,6 +14,7 @@ def main():
     ap.add_argument("--batch", type=int, default=4)
     ap.add_argument("--name", default=None)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--mosaic", type=float, default=0.5, help="0 khi fine-tune / thiếu VRAM (ảnh nhiều răng -> OOM)")
     ap.add_argument("--fraction", type=float, default=1.0, help="<1 để chạy thử nhanh")
     a = ap.parse_args()
     name = a.name or f"{a.model.split('.')[0]}_{a.imgsz}"
@@ -29,7 +30,7 @@ def main():
         # Bản lật đúng nhãn đã được tạo offline trong prepare_data.py. flipud cũng sai (đảo hàm trên/dưới).
         fliplr=0.0, flipud=0.0,
         # Đánh số phụ thuộc ngữ cảnh toàn hàm -> mosaic/scale vừa phải, xoay nhẹ
-        degrees=5, translate=0.1, scale=0.25, mosaic=0.5, mixup=0.0,
+        degrees=5, translate=0.1, scale=0.25, mosaic=a.mosaic, mixup=0.0,
     )
     best = YOLO(f"{model.trainer.save_dir}/weights/best.pt")
     m = best.val(data=a.data, imgsz=a.imgsz, batch=a.batch, split="val", project="runs", name=f"{name}_val", exist_ok=True)
