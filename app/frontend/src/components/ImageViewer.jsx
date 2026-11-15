@@ -37,7 +37,41 @@ function drawStrokes(canvas, strokes, view) {
   }
 }
 
-export default function ImageViewer({ src, teeth, strokes, opts, editable, hover, onHover, onChange, onEditStart, onUndo, onRedo }) {
+/* Lớp vẽ phân tích răng khôn: trục răng khôn (đỏ = ngầm/lệch, xanh lá = bình thường), trục răng 7 (xanh dương),
+   mức mặt nhai (vàng) và CEJ ước lượng (tím) của răng 7. Toạ độ ảnh gốc. */
+function WisdomOverlay({ items, px, active }) {
+  return (
+    <g className="wisdom-axis">
+      {items.filter((w) => w.m3_axis).map((w) => {
+        const on = w.tooth_id === active
+        const c = w.impacted ? '#ef4444' : '#22c55e'
+        const [cx, cy] = w.m3_center, [ax, ay] = w.m3_axis
+        const L3 = w.m2_len ? w.m2_len / 2 : 120 // nửa chiều dài mũi tên ~ nửa răng 7
+        const seg = (x, y, dx, dy, l) => [x - dx * l, y - dy * l, x + dx * l, y + dy * l]
+        const [x1, y1, x2, y2] = seg(cx, cy, ax, ay, L3)
+        const parts = [<line key="m3" x1={x1} y1={y1} x2={x2} y2={y2} stroke={c} strokeWidth={on ? 3.5 : 2.5} vectorEffect="non-scaling-stroke" markerEnd={`url(#arrow-${w.impacted ? 'bad' : 'ok'})`} />]
+        if (w.m2_axis) {
+          const [bx, by] = w.m2_center, [ux, uy] = w.m2_axis
+          const [p1, q1, p2, q2] = seg(bx, by, ux, uy, w.m2_len / 2)
+          parts.push(<line key="m2" x1={p1} y1={q1} x2={p2} y2={q2} stroke="#60a5fa" strokeWidth={1.5} strokeDasharray={`${6 * px} ${4 * px}`} vectorEffect="non-scaling-stroke" />)
+          const n = [-uy, ux], half = w.m2_len * 0.9
+          for (const [lvl, col, k] of [[w.occ_level, '#facc15', 'occ'], [w.cej_level, '#d946ef', 'cej']]) {
+            const t = lvl - (bx * ux + by * uy) // điểm trên trục răng 7 tại mức lvl
+            const ox = bx + ux * t, oy = by + uy * t
+            parts.push(<line key={k} x1={ox - n[0] * half} y1={oy - n[1] * half} x2={ox + n[0] * half} y2={oy + n[1] * half} stroke={col} strokeWidth={1.5} strokeOpacity={0.9} vectorEffect="non-scaling-stroke" />)
+          }
+        }
+        const below = w.fdi[0] === '3' || w.fdi[0] === '4'
+        parts.push(<text key="t" x={cx} y={cy + (below ? 1 : -1) * (L3 + 22 * px)} className="fdi" fontSize={13 * px} strokeWidth={3 * px} fill={c}>
+          {w.fdi} {w.winter_angle > 0 ? '+' : ''}{Math.round(w.winter_angle)}°{w.depth ? ` ${w.depth}` : ''}
+        </text>)
+        return <g key={w.fdi}>{parts}</g>
+      })}
+    </g>
+  )
+}
+
+export default function ImageViewer({ src, teeth, strokes, opts, editable, hover, onHover, onChange, onEditStart, onUndo, onRedo, wisdom = [] }) {
   const boxRef = useRef(null)
   const svgRef = useRef(null)
   const canvasRef = useRef(null)
@@ -133,6 +167,13 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
       {size && (
         <svg ref={svgRef} className="viewer-svg" style={drawing ? { cursor: CURSORS[tool] } : undefined} onPointerDown={onDown} onPointerMove={onMove}
           onPointerUp={() => (drag.current = null)} onPointerLeave={() => setCursor(null)} onContextMenu={(e) => e.preventDefault()}>
+          <defs>
+            {[['ok', '#22c55e'], ['bad', '#ef4444']].map(([k, c]) => (
+              <marker key={k} id={`arrow-${k}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill={c} />
+              </marker>
+            ))}
+          </defs>
           <g transform={`translate(${view.tx} ${view.ty}) scale(${view.s})`}>
             <image href={src} width={size.w} height={size.h} style={{ imageRendering: view.s > 2 ? 'pixelated' : 'auto' }} />
             <g opacity={opts.opacity}>
@@ -163,6 +204,7 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
                 )
               })}
             </g>
+            {opts.wisdom && wisdom.length > 0 && <WisdomOverlay items={wisdom} px={px} active={active} />}
           </g>
           {drawing && cursor && ( // vòng tròn xem trước cỡ bút
             <circle cx={view.tx + cursor[0] * view.s} cy={view.ty + cursor[1] * view.s} r={brush.width / 2}

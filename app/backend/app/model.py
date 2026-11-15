@@ -41,6 +41,20 @@ class ToothSegmenter:
         p = out[keep]
         return p[:, :4], p[:, 4], p[:, 5].astype(int), p[:, 6:]
 
+    @staticmethod
+    def _dedupe(binms, scores, ios_thr=0.6):
+        """Loại phát hiện trùng (không phân lớp) theo MASK, duyệt conf giảm dần: bỏ mask có
+        giao / diện tích mask nhỏ hơn >= ios_thr với mask đã giữ -> bắt cả mask nhỏ nằm gọn trong mask to
+        (IoU thấp nên NMS bỏ sót). Dùng mask chứ không dùng box: box răng nghiêng trùm lên răng bên cạnh."""
+        area = [int(m.sum()) for m in binms]
+        keep = []
+        for i in np.argsort(-np.asarray(scores)):
+            if area[i] == 0:
+                continue
+            if all(np.logical_and(binms[i], binms[j]).sum() / min(area[i], area[j]) < ios_thr for j in keep):
+                keep.append(i)
+        return sorted(keep)
+
     def __call__(self, img):
         h, w = img.shape[:2]
         x, r, px, py = self._letterbox(img)
@@ -52,12 +66,17 @@ class ToothSegmenter:
             return []
         masks = 1 / (1 + np.exp(-(coef @ proto[0].reshape(nm, -1)))).reshape(-1, mh, mw)
 
-        teeth = []
-        for b, s, c, m in zip(boxes, scores, cls, masks):
+        binms = []
+        for b, m in zip(boxes, masks):
             m = cv2.resize(m, (self.size, self.size), interpolation=cv2.INTER_LINEAR)
             x1, y1, x2, y2 = np.clip(b, 0, self.size).astype(int)
             binm = np.zeros(m.shape, np.uint8)
             binm[y1:y2, x1:x2] = m[y1:y2, x1:x2] > 0.5  # chỉ giữ mask trong box
+            binms.append(binm)
+
+        teeth = []
+        for i in self._dedupe(binms, scores):
+            b, s, c, binm = boxes[i], scores[i], cls[i], binms[i]
             cnts, _ = cv2.findContours(binm, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if not cnts:
                 continue

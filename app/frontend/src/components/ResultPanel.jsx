@@ -16,6 +16,34 @@ function wisdomText(found) {
   return `Răng khôn ${found.join(', ')}: ${found.map(where).join(', ')}.`
 }
 
+const WINTER_VI = { vertical: 'Thẳng', mesioangular: 'Nghiêng gần', horizontal: 'Nằm ngang', distoangular: 'Nghiêng xa', other: 'Khác' }
+const DEPTH_VI = { A: 'A · ngang/trên mặt nhai R7', B: 'B · giữa mặt nhai và CEJ R7', C: 'C · dưới CEJ R7' }
+const FLAG_VI = { thieu_m2: 'thiếu răng 7, góc so với trục đứng', truc_m3_khong_chac: 'trục răng khôn không chắc (mầm răng?)', truc_m2_khong_chac: 'trục răng 7 không chắc', mask_m3_qua_nho: 'mask quá nhỏ' }
+
+/* Bảng phân tích từng răng khôn (Winter, độ sâu, ngầm/lệch); hover đồng bộ với viewer. */
+function WisdomList({ items, hover, onHover }) {
+  return (
+    <div className="wisdom-list">
+      {items.map((w) => (
+        <div key={w.fdi} className={`wisdom-row ${w.impacted ? 'bad' : 'ok'} ${w.tooth_id === hover ? 'active' : ''}`}
+          onMouseEnter={() => onHover(w.tooth_id)} onMouseLeave={() => onHover(null)}>
+          <div className="wisdom-head">
+            <b>{w.fdi}</b>
+            <span className={`badge ${w.impacted ? 'yes' : ''}`}>{w.winter ? (w.impacted ? 'Ngầm/lệch' : 'Bình thường') : '—'}</span>
+          </div>
+          {w.winter ? (
+            <div className="small">
+              {WINTER_VI[w.winter]} {w.winter_angle > 0 ? '+' : ''}{w.winter_angle}°
+              {w.depth && <> · độ sâu {DEPTH_VI[w.depth]}</>}
+            </div>
+          ) : null}
+          {w.flags?.length > 0 && <div className="muted small">⚠ {w.flags.map((f) => FLAG_VI[f] ?? f).join('; ')}</div>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Chart({ row, byFdi, hover, onHover }) {
   return (
     <div className="chart-row">
@@ -37,6 +65,9 @@ export default function ResultPanel({ job, busy, teeth, hover, onHover, msg }) {
   const step = (k) => job?.steps.find((s) => s.key === k)
   const byFdi = Object.fromEntries(teeth.map((t) => [t.fdi, t]))
   const wisdom = WISDOM.filter((f) => byFdi[f])
+  const wAnalysis = job?.result.findings.wisdom
+  const wDone = step('wisdom')?.status === 'done' && Array.isArray(wAnalysis)
+  const nImpacted = wDone ? wAnalysis.filter((w) => w.impacted).length : 0
   const missing = [...UPPER, ...LOWER].filter((f) => !byFdi[f]).sort()
   const hasSeg = step('seg')?.status === 'done'
 
@@ -57,9 +88,15 @@ export default function ResultPanel({ job, busy, teeth, hover, onHover, msg }) {
           <div className="res-item">
             <div className="res-title">
               Răng khôn
-              <span className={`badge ${wisdom.length ? 'yes' : ''}`}>{wisdom.length ? `Có · ${wisdom.length}` : 'Không'}</span>
+              <span className={`badge ${nImpacted ? 'yes' : ''}`}>
+                {!wisdom.length ? 'Không' : wDone ? (nImpacted ? `Ngầm/lệch · ${nImpacted}/${wisdom.length}` : `Có · ${wisdom.length}`) : `Có · ${wisdom.length}`}
+              </span>
             </div>
             <p>{wisdomText(wisdom)}</p>
+            {wDone && wAnalysis.length > 0 && <WisdomList items={wAnalysis} hover={hover} onHover={onHover} />}
+            {wDone && wAnalysis.length > 0 && (
+              <p className="muted small">Góc Winter: trục răng khôn so với trục răng 7 (dương = nghiêng về phía gần). Kết quả tự động, cần bác sĩ xác nhận.</p>
+            )}
           </div>
           <div className="dental-chart">
             <div className="muted small">Hàm trên</div>

@@ -3,11 +3,14 @@ Thêm bước mới: viết hàm f(image, result) rồi đăng ký vào RUNNERS.
 """
 import os, threading, time, uuid
 from collections import OrderedDict
-from . import db
+import cv2
+import numpy as np
+from . import db, wisdom_geom
 from .model import ToothSegmenter
 
 MODEL_PATH = os.getenv("MODEL_PATH", "./models/tooth_seg.onnx")
-WISDOM_FDI = {"18", "28", "38", "48"}
+# Ngưỡng luật ngầm/lệch, chỉnh trên DENTEX bằng research/wisdom-analysis/calibrate.py
+WISDOM_PARAMS = wisdom_geom.load_params(os.path.join(os.path.dirname(__file__), "wisdom_params.json"))
 
 STEPS = [
     ("seg", "Phân đoạn răng"),
@@ -35,8 +38,29 @@ def step_seg(image, res):
     res["teeth"] = get_model()(image)
 
 
+def analyze_wisdom(teeth, width, height):
+    """Phân tích hình học răng khôn từ polygon răng 7 & 8: Winter, độ sâu A/B/C, ngầm/lệch.
+    Trả về list (mỗi phần tử 1 răng khôn), thêm "text" mô tả tiếng Việt và "tooth_id" để UI hover."""
+    masks, ids, best = {}, {}, {}
+    for t in teeth:
+        f = int(t["fdi"])
+        # trùng số FDI (model đánh nhầm số) -> chỉ phân tích răng conf cao nhất
+        if f % 10 in (7, 8) and len(t["polygon"]) >= 3 and t.get("conf", 1) > best.get(f, -1):
+            best[f] = t.get("conf", 1)
+            m = np.zeros((height, width), np.uint8)
+            cv2.fillPoly(m, [np.round(np.array(t["polygon"])).astype(np.int32)], 1)
+            masks[f], ids[f] = m.astype(bool), t.get("id")
+    out = []
+    for r in wisdom_geom.analyze_teeth(masks, WISDOM_PARAMS):
+        r["fdi"] = str(r["fdi"])
+        r["tooth_id"] = ids.get(int(r["fdi"]))
+        r["text"] = wisdom_geom.describe({**r, "fdi": int(r["fdi"])})
+        out.append(r)
+    return out
+
+
 def step_wisdom(image, res):
-    res["findings"]["wisdom"] = [t["fdi"] for t in res["teeth"] if t["fdi"] in WISDOM_FDI]
+    res["findings"]["wisdom"] = analyze_wisdom(res["teeth"], res["width"], res["height"])
 
 
 RUNNERS = {"seg": step_seg, "wisdom": step_wisdom}  # bước chưa có -> "skipped"

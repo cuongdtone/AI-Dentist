@@ -78,5 +78,7 @@ def save_edits(inf_id: int, body: DocIn, user=Depends(auth.current_user)):
         raise HTTPException(404, "Không tìm thấy kết quả")
     res = json.loads(row["result"])
     res["teeth"], res["strokes"] = body.teeth, body.strokes
+    # polygon răng 7/8 có thể đã sửa -> tính lại phân tích răng khôn cho khớp
+    res.setdefault("findings", {})["wisdom"] = pipeline.analyze_wisdom(body.teeth, res["width"], res["height"])
     db.q("UPDATE inferences SET result=?, teeth=? WHERE id=?", (json.dumps(res), len(body.teeth), inf_id))
-    return {"ok": True}
+    return {"ok": True, "findings": res["findings"]}

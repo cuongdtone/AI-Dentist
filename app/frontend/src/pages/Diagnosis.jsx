@@ -27,7 +27,7 @@ export default function Diagnosis({ active }) {
   const [dirty, setDirty] = useState(false)
   const [mode, setMode] = useState('view') // view | edit
   const [hover, setHover] = useState(null)
-  const [opts, setOpts] = useState({ opacity: 0.8, mask: false, polygon: false, fdi: true })
+  const [opts, setOpts] = useState({ opacity: 0.8, mask: false, polygon: false, fdi: true, wisdom: true })
   const [msg, setMsg] = useState('')
   const [sizes, setSizes] = useState(loadSizes)
   const diagRef = useRef(null)
@@ -141,7 +141,8 @@ export default function Diagnosis({ active }) {
 
   const save = async () => {
     try {
-      await api(`/inferences/${job.inference_id}`, { method: 'PUT', json: doc })
+      const r = await api(`/inferences/${job.inference_id}`, { method: 'PUT', json: doc })
+      if (r.findings) setJob((j) => ({ ...j, result: { ...j.result, findings: r.findings } })) // răng khôn tính lại theo polygon đã sửa
       setDirty(false)
       setMsg('Đã lưu chỉnh sửa')
     } catch (e) {
@@ -174,13 +175,15 @@ export default function Diagnosis({ active }) {
           <label><input type="checkbox" checked={opts.mask} onChange={opt('mask')} /> Mask</label>
           <label><input type="checkbox" checked={opts.polygon} onChange={opt('polygon')} /> Polygon</label>
           <label><input type="checkbox" checked={opts.fdi} onChange={opt('fdi')} /> FDI</label>
+          <label title="Trục răng khôn, trục răng 7, mặt nhai, CEJ"><input type="checkbox" checked={opts.wisdom} onChange={opt('wisdom')} /> Răng khôn</label>
           <label>Opacity <input type="range" min="0" max="1" step="0.05" value={opts.opacity} onChange={opt('opacity')} /></label>
           <span className="spacer" />
           <Dropdown className={`mode-dd ${mode}`} title="Chế độ" value={mode} options={MODES} onChange={setMode} align="right" />
           <button className="btn" onClick={save} disabled={mode !== 'edit' || !dirty || !job?.inference_id}>💾 Lưu</button>
         </div>
         <ImageViewer src={src} teeth={doc.teeth} strokes={doc.strokes} opts={opts} editable={editable}
-          hover={hover} onHover={setHover} onChange={change} onEditStart={snapshot} onUndo={undo} onRedo={redo} />
+          hover={hover} onHover={setHover} onChange={change} onEditStart={snapshot} onUndo={undo} onRedo={redo}
+          wisdom={job?.result.findings?.wisdom ?? []} />
       </section>
       <div className="splitter" onPointerDown={startResize('right')} onDoubleClick={() => setSizes(DEFAULT_SIZES)} title="Kéo để đổi kích thước · nhấp đúp: mặc định" />
 
