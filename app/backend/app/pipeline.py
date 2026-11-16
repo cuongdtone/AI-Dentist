@@ -5,10 +5,11 @@ import os, threading, time, uuid
 from collections import OrderedDict
 import cv2
 import numpy as np
-from . import db, wisdom_geom
+from . import caries, db, wisdom_geom
 from .model import ToothSegmenter
 
 MODEL_PATH = os.getenv("MODEL_PATH", "./models/tooth_seg.onnx")
+CARIES_MODEL_PATH = os.getenv("CARIES_MODEL_PATH", "./models/caries_seg.onnx")
 # Ngưỡng luật ngầm/lệch, chỉnh trên DENTEX bằng research/wisdom-analysis/calibrate.py
 WISDOM_PARAMS = wisdom_geom.load_params(os.path.join(os.path.dirname(__file__), "wisdom_params.json"))
 
@@ -20,18 +21,31 @@ STEPS = [
     ("cej", "Phân tích mức CEJ"),
 ]
 
-_model = None
+_models = {}
 _model_lock = threading.Lock()
 
 
-def get_model() -> ToothSegmenter:
-    global _model
+class Skip(Exception):
+    """Bước không chạy được nhưng không phải lỗi (vd chưa có model) -> status 'skipped' + note."""
+
+
+def _load(path) -> ToothSegmenter:
     with _model_lock:
-        if _model is None:
-            if not os.path.exists(MODEL_PATH):
-                raise FileNotFoundError(f"Không thấy model: {MODEL_PATH}")
-            _model = ToothSegmenter(MODEL_PATH)
-        return _model
+        if path not in _models:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Không thấy model: {path}")
+            _models[path] = ToothSegmenter(path)
+        return _models[path]
+
+
+def get_model() -> ToothSegmenter:
+    return _load(MODEL_PATH)
+
+
+def get_caries_model() -> ToothSegmenter:
+    if not os.path.exists(CARIES_MODEL_PATH):
+        raise Skip("Chưa có model sâu răng")
+    return _load(CARIES_MODEL_PATH)
 
 
 # ---------------- Cấu hình từng bước (UI tự sinh form từ schema này) ----------------
@@ -74,6 +88,24 @@ CONFIG_SCHEMA = {
         _n("min_elong", "Độ thon dài tối thiểu", 1.0, 2.0, 0.05, WISDOM_PARAMS["min_elong"],
            "Tỉ lệ trục dài / trục ngắn của mask. Dưới ngưỡng (răng gần tròn, ví dụ mầm răng chưa có chân) "
            "thì trục răng không đáng tin → kết quả bị gắn cờ cảnh báo."),
+    ],
+    "caries": [
+        _n("conf", "Ngưỡng tin cậy (conf)", 0.05, 0.95, 0.05, 0.25,
+           "Chỉ giữ vùng sâu có độ tin cậy ≥ ngưỡng. Tăng → ít báo sai (vết mờ, chồng ảnh, bóng miếng trám) nhưng dễ "
+           "bỏ sót sâu nhỏ/sớm; giảm → bắt nhiều hơn nhưng nhiều báo động giả."),
+        _n("mask_thr", "Ngưỡng mask", 0.1, 0.9, 0.05, 0.5,
+           "Xác suất tối thiểu để một điểm ảnh thuộc vùng sâu. Tăng → viền vùng sâu co lại; giảm → nở ra."),
+        _n("own_thr", "Tỉ lệ nằm trong răng", 0.1, 1.0, 0.05, 0.5,
+           "Mỗi răng được cắt riêng nên khung cắt có cả răng kề. Vùng sâu chỉ được gán cho răng nếu ≥ tỉ lệ này "
+           "diện tích nằm trong viền răng đó (phần còn lại do crop của răng kề xử lý). Giảm nếu vùng sâu ở mặt "
+           "tiếp giáp bị mất; tăng nếu một vùng sâu bị báo cho cả hai răng."),
+        _n("margin", "Lề khung cắt", 0.0, 0.4, 0.05, 0.15,
+           "Lề thêm quanh bbox răng khi cắt, tính theo tỉ lệ kích thước răng. Model được train với 0.15 — "
+           "đổi nhiều có thể làm giảm độ chính xác."),
+        _n("min_area", "Diện tích tối thiểu (px)", 0, 2000, 10, 50,
+           "Bỏ vùng sâu nhỏ hơn số pixel này (trên ảnh gốc) — thường là nhiễu."),
+        _n("eps", "Độ rút gọn polygon (px)", 0.5, 5.0, 0.5, 1.0,
+           "Sai số tối đa (pixel, trên ảnh crop đã đưa về kích thước model) khi rút gọn viền vùng sâu thành polygon."),
     ],
 }
 REQUIRES = {"wisdom": "seg", "caries": "seg", "perio": "seg", "cej": "seg"}  # bước cần kết quả của bước khác
@@ -131,7 +163,11 @@ def step_wisdom(image, res, p):
     res["findings"]["wisdom"] = analyze_wisdom(res["teeth"], res["width"], res["height"], p)
 
 
-RUNNERS = {"seg": step_seg, "wisdom": step_wisdom}  # bước chưa có -> "skipped"
+def step_caries(image, res, p):
+    res["findings"]["caries"] = caries.analyze_caries(get_caries_model(), image, res["teeth"], p)
+
+
+RUNNERS = {"seg": step_seg, "wisdom": step_wisdom, "caries": step_caries}  # bước chưa có -> "skipped"
 
 
 def counts(res):
@@ -172,6 +208,9 @@ class Job:
             t0 = time.perf_counter()
             try:
                 fn(self.image, self.result, cfg)
+            except Skip as e:
+                st.update(status="skipped", note=str(e))
+                continue
             except Exception as e:
                 st.update(status="error", error=str(e))
                 self.status = "error"
