@@ -7,9 +7,9 @@ import ImageViewer from '../components/ImageViewer'
 import PipelineGraph from '../components/PipelineGraph'
 import ResultPanel from '../components/ResultPanel'
 
-const EMPTY = { teeth: [], strokes: [] }
+const EMPTY = { teeth: [], strokes: [], caries: null } // caries: null = bước sâu răng chưa xong
 const MODES = [
-  { value: 'edit', label: <><Icon name="pencil" size={14} /> Chỉnh sửa</>, desc: 'Sửa polygon, vẽ chú thích' },
+  { value: 'edit', label: <><Icon name="pencil" size={14} /> Chỉnh sửa</>, desc: 'Sửa polygon răng / vùng sâu, vẽ chú thích' },
   { value: 'view', label: <><Icon name="eye" size={14} /> Chỉ xem</>, desc: 'Xem kết quả, không thay đổi' },
 ]
 // Độ rộng panel trái / phải (% màn hình), kéo thanh chia để đổi; nhớ theo trình duyệt
@@ -121,7 +121,13 @@ export default function Diagnosis({ active }) {
       try {
         const j = await api(`/jobs/${id}`)
         setJob(j)
-        setDoc((d) => (d.teeth.length ? d : { ...d, teeth: j.result.teeth })) // vẽ lại ngay khi phân đoạn xong
+        const cs = j.steps.find((x) => x.key === 'caries')
+        const jc = cs?.status === 'done' && Array.isArray(j.result.findings?.caries) ? j.result.findings.caries : null
+        setDoc((d) => ({ // vẽ lại ngay khi phân đoạn / sâu răng xong; sau đó giữ bản đang sửa
+          ...d,
+          teeth: d.teeth.length ? d.teeth : j.result.teeth,
+          caries: d.caries ?? jc,
+        }))
         if (j.status !== 'running') clearInterval(timer.current)
       } catch (e) {
         setMsg(e.message)
@@ -213,12 +219,12 @@ export default function Diagnosis({ active }) {
         <ImageViewer src={src} teeth={doc.teeth} strokes={doc.strokes} editable={editable}
           opts={{ ...opts, image: layers.input, teeth: layers.seg, wisdom: layers.wisdom, caries: layers.caries }}
           hover={hover} onHover={setHover} onChange={change} onEditStart={snapshot} onUndo={undo} onRedo={redo}
-          wisdom={job?.result.findings?.wisdom ?? []} caries={job?.result.findings?.caries ?? []} />
+          wisdom={job?.result.findings?.wisdom ?? []} caries={doc.caries ?? []} />
       </section>
       <div className="splitter" onPointerDown={startResize('right')} onDoubleClick={() => setSizes(DEFAULT_SIZES)} title="Kéo để đổi kích thước · nhấp đúp: mặc định" />
 
       <section className="panel right">
-        <ResultPanel job={job} busy={busy} teeth={doc.teeth} hover={hover} onHover={setHover} msg={msg} />
+        <ResultPanel job={job} busy={busy} teeth={doc.teeth} caries={doc.caries} hover={hover} onHover={setHover} msg={msg} />
       </section>
 
       {openStep && (

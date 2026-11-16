@@ -33,10 +33,10 @@ Model được mount vào container (`./backend/models`), nên sau khi export l�
 ```bash
 cd app
 ADMIN_PASSWORD=... JWT_SECRET=... docker compose up -d --build
-# http://localhost:8080  (mặc định admin / admin)
+# http://localhost:8112  (mặc định admin / admin)
 ```
 
-Biến môi trường: `PORT` (8080), `ADMIN_USER`, `ADMIN_PASSWORD`, `JWT_SECRET`.
+Biến môi trường: `PORT` (8112), `ADMIN_USER`, `ADMIN_PASSWORD`, `JWT_SECRET`.
 Dữ liệu (SQLite + ảnh upload) nằm trong volume `app-data`.
 
 Dev: `uvicorn app.main:app --reload` trong `backend/` và `npm run dev` trong `frontend/` (Vite proxy `/api` -> :8000).

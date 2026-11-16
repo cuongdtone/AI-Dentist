@@ -17,6 +17,7 @@ class LoginIn(BaseModel):
 class DocIn(BaseModel):
     teeth: list[dict]
     strokes: list[dict] = []  # nét vẽ chú thích (bút chì / tẩy)
+    caries: list[dict] | None = None  # vùng sâu răng đã sửa (None = không đổi)
 
 
 @app.get("/api/health")
@@ -82,6 +83,8 @@ def save_edits(inf_id: int, body: DocIn, user=Depends(auth.current_user)):
         raise HTTPException(404, "Không tìm thấy kết quả")
     res = json.loads(row["result"])
     res["teeth"], res["strokes"] = body.teeth, body.strokes
+    if body.caries is not None:
+        res.setdefault("findings", {})["caries"] = body.caries
     # polygon răng 7/8 có thể đã sửa -> tính lại phân tích răng khôn cho khớp (cùng config lúc chạy)
     wcfg = pipeline.resolve_config(res.get("config"))["wisdom"]
     if wcfg["enabled"]:

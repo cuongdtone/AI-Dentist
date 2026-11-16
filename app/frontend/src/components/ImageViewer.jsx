@@ -11,6 +11,7 @@ const QUAD_HUE = { 1: 213, 2: 18, 3: 158, 4: 330 } // màu theo cung hàm FDI
 export const toothColor = (fdi) => `hsl(${QUAD_HUE[fdi[0]] ?? 0} 85% 60%)`
 const centroid = (p) => p.reduce((a, [x, y]) => [a[0] + x / p.length, a[1] + y / p.length], [0, 0])
 const round = ([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]
+const area = (p) => Math.abs(p.reduce((a, [x, y], i) => { const [u, v] = p[(i + 1) % p.length]; return a + x * v - u * y }, 0)) / 2
 
 const TOOLS = [['hand', 'hand', 'Bàn tay: di chuyển ảnh, kéo đỉnh/cạnh polygon'], ['pen', 'pencil', 'Bút chì'], ['eraser', 'eraser', 'Tẩy']]
 const WIDTHS = [1, 2, 4, 8, 12, 16, 24, 32].map((w) => ({
@@ -71,15 +72,34 @@ function WisdomOverlay({ items, px, active }) {
   )
 }
 
-/* Lớp vẽ vùng sâu răng (đỏ); vùng thuộc răng đang hover được tô đậm. Không bắt chuột để không cản sửa polygon răng. */
-function CariesOverlay({ items, active }) {
+/* Lớp vẽ vùng sâu răng: mặc định chỉ viền đỏ; bật Mask -> tô đỏ đậm. Nhãn conf cạnh mỗi vùng.
+   Chế độ sửa (bàn tay): hover vùng -> kéo đỉnh/cạnh như polygon răng. */
+function CariesOverlay({ items, active, activeTooth, mask, px, edit, onEnter, onLeave, onVertexDown, onEdgeDown }) {
   return (
     <g className="caries-overlay">
       {items.map((c) => {
-        const on = c.tooth_id === active
+        const on = c.id === active || c.tooth_id === activeTooth
+        const editing = edit && c.id === active
+        const poly = c.polygon
+        const top = poly.reduce((a, p) => (p[1] < a[1] ? p : a), poly[0])
         return (
-          <polygon key={c.id} points={c.polygon.join(' ')} fill="#ef4444" fillOpacity={on ? 0.55 : 0.3}
-            stroke={on ? '#fff' : '#ef4444'} strokeWidth={on ? 2 : 1.5} vectorEffect="non-scaling-stroke" />
+          <g key={c.id} onPointerEnter={() => onEnter(c)} onPointerLeave={onLeave}>
+            <polygon points={poly.join(' ')} pointerEvents="all" vectorEffect="non-scaling-stroke"
+              fill={mask ? '#b91c1c' : 'none'} fillOpacity={mask ? (on ? 0.85 : 0.7) : 0}
+              stroke={on ? '#fff' : '#ef4444'} strokeWidth={on ? 2.5 : 2} />
+            {editing && poly.map((p, i) => {
+              const q = poly[(i + 1) % poly.length]
+              return <line key={`e${i}`} className="edge-hit" x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]}
+                stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" onPointerDown={(e) => onEdgeDown(e, c.id, i)} />
+            })}
+            {editing && poly.map((p, i) => (
+              <circle key={i} cx={p[0]} cy={p[1]} r={4 * px} fill="#fff" stroke="#ef4444" strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke" className="vertex" onPointerDown={(e) => onVertexDown(e, c.id, i)} />
+            ))}
+            <text x={top[0]} y={top[1] - 6 * px} className="fdi caries-conf" fontSize={(on ? 13 : 11) * px} strokeWidth={3 * px} fill="#ef4444">
+              {(c.conf * 100).toFixed(0)}%
+            </text>
+          </g>
         )
       })}
     </g>
@@ -97,6 +117,7 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
   const [cursor, setCursor] = useState(null)
   const [tool, setTool] = useState('hand')
   const [brush, setBrush] = useState({ color: COLORS[0], width: 4 })
+  const [hc, setHc] = useState(null) // id vùng sâu đang hover
   const editPoly = editable && tool === 'hand'
   const drawing = editable && tool !== 'hand'
 
@@ -137,7 +158,17 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
     const r = svgRef.current.getBoundingClientRect()
     return [(e.clientX - r.left - view.tx) / view.s, (e.clientY - r.top - view.ty) / view.s]
   }
-  const setPoly = (id, fn) => onChange((d) => ({ teeth: d.teeth.map((t) => (t.id === id ? { ...t, polygon: fn(t.polygon) } : t)) }))
+  // kind 'tooth' | 'caries'; sửa vùng sâu -> cập nhật lại diện tích + tỉ lệ so với răng
+  const setPoly = (id, fn, kind = 'tooth') => onChange((d) => (kind === 'tooth'
+    ? { teeth: d.teeth.map((t) => (t.id === id ? { ...t, polygon: fn(t.polygon) } : t)) }
+    : {
+        caries: d.caries.map((c) => {
+          if (c.id !== id) return c
+          const polygon = fn(c.polygon), a = area(polygon)
+          const tooth = d.teeth.find((t) => t.id === c.tooth_id)
+          return { ...c, polygon, area: Math.round(a), tooth_frac: tooth ? Math.round((a / Math.max(area(tooth.polygon), 1)) * 1000) / 1000 : c.tooth_frac }
+        }),
+      }))
   const begin = (e, d) => { e.stopPropagation(); svgRef.current.setPointerCapture(e.pointerId); drag.current = d }
 
   const onDown = (e) => {
@@ -149,18 +180,18 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
     }
     begin(e, { pan: [e.clientX, e.clientY, view.tx, view.ty] })
   }
-  const onVertexDown = (e, id, idx) => {
+  const onVertexDown = (e, id, idx, kind = 'tooth') => {
     if (e.button === 1) return
     onEditStart()
-    if (e.button === 2) { e.stopPropagation(); return setPoly(id, (p) => (p.length > 3 ? p.filter((_, i) => i !== idx) : p)) }
-    begin(e, { id, idx })
+    if (e.button === 2) { e.stopPropagation(); return setPoly(id, (p) => (p.length > 3 ? p.filter((_, i) => i !== idx) : p), kind) }
+    begin(e, { id, idx, kind })
   }
-  const onEdgeDown = (e, id, idx) => {
+  const onEdgeDown = (e, id, idx, kind = 'tooth') => {
     if (e.button !== 0) return
     onEditStart()
     const p = round(toImage(e))
-    setPoly(id, (poly) => [...poly.slice(0, idx + 1), p, ...poly.slice(idx + 1)])
-    begin(e, { id, idx: idx + 1 })
+    setPoly(id, (poly) => [...poly.slice(0, idx + 1), p, ...poly.slice(idx + 1)], kind)
+    begin(e, { id, idx: idx + 1, kind })
   }
   const onMove = (e) => {
     const p = round(toImage(e))
@@ -169,12 +200,15 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
     if (!d) return
     if (d.pan) setView((v) => ({ ...v, tx: d.pan[2] + e.clientX - d.pan[0], ty: d.pan[3] + e.clientY - d.pan[1] }))
     else if (d.draw) onChange(({ strokes: s }) => ({ strokes: [...s.slice(0, -1), { ...s.at(-1), points: [...s.at(-1).points, p] }] }))
-    else setPoly(d.id, (poly) => poly.map((q, i) => (i === d.idx ? p : q)))
+    else setPoly(d.id, (poly) => poly.map((q, i) => (i === d.idx ? p : q)), d.kind)
   }
 
-  const active = drag.current?.id ?? hover
+  const dc = drag.current?.kind === 'caries'
+  const active = dc ? hover : drag.current?.id ?? hover
+  const activeC = dc ? drag.current.id : hc
   const px = 1 / view.s // 1 pixel màn hình theo đơn vị ảnh
   const hovered = teeth.find((t) => t.id === active)
+  const hoveredC = caries.find((c) => c.id === activeC)
 
   return (
     <div className="viewer" ref={boxRef}>
@@ -219,7 +253,11 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
                 )
               })}
             </g>
-            {opts.caries && caries.length > 0 && <CariesOverlay items={caries} active={active} />}
+            {opts.caries && caries.length > 0 && (
+              <CariesOverlay items={caries} active={activeC} activeTooth={active} mask={opts.mask} px={px} edit={editPoly}
+                onEnter={(c) => { setHc(c.id); onHover(c.tooth_id) }} onLeave={() => { setHc(null); onHover(null) }}
+                onVertexDown={(e, id, i) => onVertexDown(e, id, i, 'caries')} onEdgeDown={(e, id, i) => onEdgeDown(e, id, i, 'caries')} />
+            )}
             {opts.wisdom && wisdom.length > 0 && <WisdomOverlay items={wisdom} px={px} active={active} />}
           </g>
           {drawing && cursor && ( // vòng tròn xem trước cỡ bút
@@ -255,7 +293,8 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
       {size && (
         <div className="viewer-status">
           {editPoly && <span>Kéo đỉnh/cạnh để sửa · Chuột phải: xoá đỉnh · Ctrl+Z: hoàn tác</span>}
-          {hovered && <span>Răng {hovered.fdi} · {(hovered.conf * 100).toFixed(0)}% · {hovered.polygon.length} đỉnh
+          {hoveredC && <span>Sâu răng {hoveredC.fdi} · {(hoveredC.conf * 100).toFixed(0)}% · {(hoveredC.tooth_frac * 100).toFixed(0)}% diện tích răng</span>}
+          {hovered && !hoveredC && <span>Răng {hovered.fdi} · {(hovered.conf * 100).toFixed(0)}% · {hovered.polygon.length} đỉnh
             {caries.some((c) => c.tooth_id === hovered.id) && ` · sâu ${caries.filter((c) => c.tooth_id === hovered.id).length} vùng`}</span>}
           {cursor && <span>x {cursor[0].toFixed(0)}, y {cursor[1].toFixed(0)}</span>}
           <span>{(view.s * 100).toFixed(0)}%</span>

@@ -51,14 +51,13 @@ function CariesList({ items, hover, onHover }) {
   return (
     <div className="caries-list">
       {Object.values(byTooth).map((t) => {
-        const conf = Math.max(...t.list.map((c) => c.conf))
         const frac = t.list.reduce((a, c) => a + c.tooth_frac, 0)
         return (
           <div key={t.tooth_id} className={`caries-row ${t.tooth_id === hover ? 'active' : ''}`}
             onMouseEnter={() => onHover(t.tooth_id)} onMouseLeave={() => onHover(null)}>
             <b>{t.fdi}</b>
             <span className="small">{t.list.length > 1 ? `${t.list.length} vùng · ` : ''}{(frac * 100).toFixed(0)}% diện tích răng</span>
-            <span className="muted small">{(conf * 100).toFixed(0)}%</span>
+            <span className="muted small" title="Độ tin cậy từng vùng">{t.list.map((c) => `${(c.conf * 100).toFixed(0)}%`).join(' · ')}</span>
           </div>
         )
       })}
@@ -66,15 +65,17 @@ function CariesList({ items, hover, onHover }) {
   )
 }
 
-function Chart({ row, byFdi, hover, onHover, cariesIds }) {
+function Chart({ row, byFdi, hover, onHover, cariesIds, impactedIds }) {
   return (
     <div className="chart-row">
       {row.map((f) => {
         const t = byFdi[f]
-        const cls = ['tooth', t ? 'present' : 'absent', WISDOM.includes(f) && t ? 'wisdom' : '', t && cariesIds.has(t.id) ? 'caries' : '', t && t.id === hover ? 'active' : ''].join(' ')
+        const car = t && cariesIds.has(t.id), imp = t && impactedIds.has(t.id)
+        const cls = ['tooth', t ? 'present' : 'absent', WISDOM.includes(f) && t ? 'wisdom' : '', car ? 'caries' : '', imp ? 'impacted' : '', t && t.id === hover ? 'active' : ''].join(' ')
+        const tip = t ? `Răng ${where(f)} · ${(t.conf * 100).toFixed(0)}%${imp ? ' · ngầm/lệch' : ''}${car ? ' · sâu răng' : ''}` : `${f}: không thấy`
         return (
           <div key={f} className={cls} style={t ? { '--c': toothColor(f) } : undefined}
-            onMouseEnter={() => t && onHover(t.id)} onMouseLeave={() => onHover(null)} title={t ? `Răng ${where(f)} · ${(t.conf * 100).toFixed(0)}%` : `${f}: không thấy`}>
+            onMouseEnter={() => t && onHover(t.id)} onMouseLeave={() => onHover(null)} title={tip}>
             {f}
           </div>
         )
@@ -83,7 +84,7 @@ function Chart({ row, byFdi, hover, onHover, cariesIds }) {
   )
 }
 
-export default function ResultPanel({ job, busy, teeth, hover, onHover, msg }) {
+export default function ResultPanel({ job, busy, teeth, caries, hover, onHover, msg }) {
   const step = (k) => job?.steps.find((s) => s.key === k)
   const byFdi = Object.fromEntries(teeth.map((t) => [t.fdi, t]))
   const wisdom = WISDOM.filter((f) => byFdi[f])
@@ -93,9 +94,10 @@ export default function ResultPanel({ job, busy, teeth, hover, onHover, msg }) {
   const missing = [...UPPER, ...LOWER].filter((f) => !byFdi[f]).sort()
   const hasSeg = step('seg')?.status === 'done'
   const cSt = step('caries')
-  const cAnalysis = job?.result.findings.caries
+  const cAnalysis = caries // bản đang sửa (doc), không phải kết quả gốc của job
   const cDone = cSt?.status === 'done' && Array.isArray(cAnalysis)
   const cariesIds = new Set(cDone ? cAnalysis.map((c) => c.tooth_id) : [])
+  const impactedIds = new Set(wDone ? wAnalysis.filter((w) => w.impacted).map((w) => w.tooth_id) : [])
 
   return (
     <div className="results">
@@ -114,6 +116,18 @@ export default function ResultPanel({ job, busy, teeth, hover, onHover, msg }) {
           <div className="res-item">
             <div className="res-title">Số răng <b>{teeth.length} / 32</b></div>
             <p>{missing.length ? `Không thấy trên phim: ${missing.join(', ')} (mất răng hoặc model bỏ sót).` : 'Đủ 32 răng.'}</p>
+          </div>
+          <div className="dental-chart">
+            <div className="muted small">Hàm trên</div>
+            <Chart row={UPPER} byFdi={byFdi} hover={hover} onHover={onHover} cariesIds={cariesIds} impactedIds={impactedIds} />
+            <Chart row={LOWER} byFdi={byFdi} hover={hover} onHover={onHover} cariesIds={cariesIds} impactedIds={impactedIds} />
+            <div className="muted small">Hàm dưới</div>
+            {(impactedIds.size > 0 || cariesIds.size > 0) && (
+              <div className="chart-legend muted small">
+                {impactedIds.size > 0 && <span><i className="imp" />Răng khôn ngầm/lệch</span>}
+                {cariesIds.size > 0 && <span><i className="car" />Sâu răng</span>}
+              </div>
+            )}
           </div>
           <div className="res-item">
             <div className="res-title">
@@ -138,14 +152,8 @@ export default function ResultPanel({ job, busy, teeth, hover, onHover, msg }) {
             </div>
             {cDone && (cAnalysis.length > 0
               ? <><CariesList items={cAnalysis} hover={hover} onHover={onHover} />
-                <p className="muted small">Vùng đỏ trên ảnh. Phát hiện tự động trên từng răng, cần bác sĩ xác nhận.</p></>
+                <p className="muted small">Viền đỏ trên ảnh (bật Mask để tô), % là độ tin cậy. Phát hiện tự động trên từng răng, cần bác sĩ xác nhận.</p></>
               : <p className="muted small">Không phát hiện vùng sâu.</p>)}
-          </div>
-          <div className="dental-chart">
-            <div className="muted small">Hàm trên</div>
-            <Chart row={UPPER} byFdi={byFdi} hover={hover} onHover={onHover} cariesIds={cariesIds} />
-            <Chart row={LOWER} byFdi={byFdi} hover={hover} onHover={onHover} cariesIds={cariesIds} />
-            <div className="muted small">Hàm dưới</div>
           </div>
           {OTHER.map(([k, name]) => {
             const s = step(k)?.status
