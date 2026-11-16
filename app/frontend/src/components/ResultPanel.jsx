@@ -78,7 +78,11 @@ export default function ResultPanel({ job, busy, teeth, hover, onHover, msg }) {
         <span className="muted small">{busy ? 'Đang tải lên…' : JOB_TEXT[job?.status] ?? 'Chưa chạy'}</span>
       </div>
       {!hasSeg ? (
-        <p className="muted small">Tải ảnh lên để bắt đầu phân tích.</p>
+        <p className="muted small">
+          {!job ? 'Tải ảnh lên để bắt đầu phân tích.'
+            : step('seg')?.status === 'disabled' ? 'Bước Phân đoạn răng đang tắt nên không có kết quả. Chuột phải vào node → Enable.'
+              : 'Đang chờ kết quả phân đoạn răng…'}
+        </p>
       ) : (
         <>
           <div className="res-item">

@@ -40,12 +40,21 @@ Dev: `uvicorn app.main:app --reload` trong `backend/` và `npm run dev` trong `f
 
 ## Thêm bước pipeline
 
-Trong [backend/app/pipeline.py](backend/app/pipeline.py): viết `def step_x(image, res)` (ghi kết quả vào `res["findings"]["x"]` dạng list),
-đăng ký vào `RUNNERS`. Bước có trong `STEPS` mà chưa có trong `RUNNERS` sẽ hiển thị "Chưa có model".
+Trong [backend/app/pipeline.py](backend/app/pipeline.py):
+
+1. Viết `def step_x(image, res, p)`: ghi kết quả vào `res["findings"]["x"]` dạng list; `p` là config của bước
+   (`p["enabled"]` + các tham số).
+2. Đăng ký vào `RUNNERS`. Nếu bước cần kết quả của bước khác thì khai báo trong `REQUIRES`.
+3. (Tuỳ chọn) Khai báo tham số trong `CONFIG_SCHEMA["x"]`: `type` là `number` (min/max/step) hoặc `select` (options),
+   kèm `label`, `default`, `hint`. UI tự sinh hộp cấu hình (nút ⚙ trên node) từ schema này.
+
+Bước có trong `STEPS` nhưng chưa có trong `RUNNERS` hiển thị "Chưa có model".
 Thống kê đếm `len(findings[k])` với `k` thuộc `wisdom, caries, perio, cej`.
+Config của lần chạy được lưu trong `result["config"]`, nên khi lưu chỉnh sửa, phần răng khôn được tính lại với cùng tham số.
 
 ## Viewer
 
-- Lăn chuột: zoom quanh con trỏ · kéo: pan · `Fit` / `1:1`
+- Lăn chuột: zoom quanh con trỏ · kéo: pan · `Fit`
 - Mặc định: viền mờ + số FDI. Tuỳ chọn độc lập: Mask, Polygon, FDI, Opacity
-- Bật Polygon để sửa: kéo đỉnh = di chuyển, kéo cạnh = thêm đỉnh, chuột phải vào đỉnh = xoá đỉnh → `Lưu chỉnh sửa`
+- Chế độ *Chỉnh sửa*: kéo đỉnh = di chuyển, kéo cạnh = thêm đỉnh, chuột phải vào đỉnh = xoá đỉnh; bút chì / tẩy; Ctrl+Z / Ctrl+Y → `Lưu`
+- Graph: ⚙ = cấu hình bước; chuột phải vào node = Configure / Disable·Enable / Hide·Show lớp vẽ

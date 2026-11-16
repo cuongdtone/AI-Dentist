@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
+import ConfigDialog, { defaultsOf } from '../components/ConfigDialog'
 import Dropdown from '../components/Dropdown'
 import Icon from '../components/Icon'
 import ImageViewer from '../components/ImageViewer'
@@ -15,10 +16,17 @@ const MODES = [
 const DEFAULT_SIZES = { left: 16, right: 30 }
 const loadSizes = () => { try { return JSON.parse(localStorage.getItem('diagSizes')) ?? DEFAULT_SIZES } catch { return DEFAULT_SIZES } }
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+const OVERLAY_STEPS = ['input', 'seg', 'wisdom'] // bước có lớp vẽ trên ảnh (Hide/Show)
+// Cấu hình bước {key: {enabled, ...params}}: nhớ theo trình duyệt, ghép với mặc định từ schema
+const loadCfg = () => { try { return JSON.parse(localStorage.getItem('stepCfg')) ?? {} } catch { return {} } }
 
 /* Luôn được mount sau lần mở đầu tiên (xem main.jsx) -> chuyển tab không mất ảnh/kết quả. */
 export default function Diagnosis({ active }) {
   const [stepDefs, setStepDefs] = useState([])
+  const [schema, setSchema] = useState({})
+  const [cfg, setCfg] = useState(loadCfg)
+  const [layers, setLayers] = useState({ input: true, seg: true, wisdom: true }) // Hide/Show lớp vẽ
+  const [cfgOpen, setCfgOpen] = useState(null) // key bước đang mở hộp cấu hình
   const [file, setFile] = useState(null)
   const [src, setSrc] = useState(null)
   const [job, setJob] = useState(null)
@@ -27,7 +35,7 @@ export default function Diagnosis({ active }) {
   const [dirty, setDirty] = useState(false)
   const [mode, setMode] = useState('view') // view | edit
   const [hover, setHover] = useState(null)
-  const [opts, setOpts] = useState({ opacity: 0.8, mask: false, polygon: false, fdi: true, wisdom: true })
+  const [opts, setOpts] = useState({ opacity: 0.8, mask: false, polygon: false, fdi: true })
   const [msg, setMsg] = useState('')
   const [sizes, setSizes] = useState(loadSizes)
   const diagRef = useRef(null)
@@ -39,7 +47,7 @@ export default function Diagnosis({ active }) {
   docRef.current = doc
 
   useEffect(() => {
-    api('/health').then((h) => setStepDefs(h.steps)).catch((e) => setMsg(e.message))
+    api('/health').then((h) => { setStepDefs(h.steps); setSchema(h.config ?? {}) }).catch((e) => setMsg(e.message))
     return () => clearInterval(timer.current)
   }, [])
   useEffect(() => () => src && URL.revokeObjectURL(src), [src])
@@ -90,6 +98,16 @@ export default function Diagnosis({ active }) {
     window.addEventListener('pointerup', up)
   }
 
+  // --- Cấu hình bước ---
+  useEffect(() => { try { localStorage.setItem('stepCfg', JSON.stringify(cfg)) } catch { /* bỏ qua */ } }, [cfg])
+  const stepCfg = (key, c = cfg) => ({ enabled: true, ...defaultsOf(schema[key]), ...c[key] })
+  const setStepCfg = (key, patch) => setCfg((c) => ({ ...c, [key]: { ...c[key], ...patch } }))
+  const onStepAction = (key, action) => {
+    if (action === 'config') setCfgOpen(key)
+    else if (action === 'toggle') setStepCfg(key, { enabled: !stepCfg(key).enabled })
+    else if (action === 'visible') setLayers((l) => ({ ...l, [key]: !l[key] }))
+  }
+
   // --- Chạy pipeline ---
   const running = busy || job?.status === 'running'
   const reset = () => {
@@ -112,12 +130,13 @@ export default function Diagnosis({ active }) {
     }, 300)
   }
 
-  const start = async (f = file) => {
+  const start = async (f = file, c = cfg) => {
     reset()
     setBusy(true)
     try {
       const form = new FormData()
       form.append('file', f)
+      form.append('config', JSON.stringify(Object.fromEntries(stepDefs.map(([k]) => [k, stepCfg(k, c)]))))
       const j = await api('/jobs', { method: 'POST', form })
       setJob(j)
       poll(j.id)
@@ -151,9 +170,18 @@ export default function Diagnosis({ active }) {
   }
 
   const steps = [
-    { key: 'input', name: 'Ảnh đầu vào', status: file ? 'done' : 'pending', note: file?.name },
-    ...stepDefs.map(([key, name]) => job?.steps.find((s) => s.key === key) ?? { key, name, status: 'pending' }),
+    { key: 'input', name: 'Ảnh đầu vào', status: file ? 'done' : 'pending', note: file?.name, enabled: true, canHide: true, hidden: !layers.input },
+    ...stepDefs.map(([key, name]) => {
+      const s = job?.steps.find((x) => x.key === key) ?? { key, name, status: 'pending' }
+      const { enabled } = stepCfg(key)
+      return {
+        ...s, status: !enabled && s.status !== 'running' ? 'disabled' : s.status,
+        enabled, canToggle: true, hasConfig: !!schema[key]?.length,
+        canHide: OVERLAY_STEPS.includes(key), hidden: OVERLAY_STEPS.includes(key) && !layers[key],
+      }
+    }),
   ]
+  const openStep = cfgOpen && steps.find((s) => s.key === cfgOpen)
   const opt = (k) => (e) => setOpts({ ...opts, [k]: e.target.type === 'checkbox' ? e.target.checked : +e.target.value })
   const editable = mode === 'edit' && doc.teeth.length > 0
 
@@ -166,7 +194,7 @@ export default function Diagnosis({ active }) {
           <button className="btn small primary" onClick={() => start()} disabled={!file || running}>▶ Chạy</button>
           <button className="btn small danger" onClick={cancel} disabled={!job || job.status !== 'running'}>■ Huỷ</button>
         </div>
-        <div className="graph"><PipelineGraph steps={steps} /></div>
+        <div className="graph"><PipelineGraph steps={steps} onAction={onStepAction} /></div>
       </section>
       <div className="splitter" onPointerDown={startResize('left')} onDoubleClick={() => setSizes(DEFAULT_SIZES)} title="Kéo để đổi kích thước · nhấp đúp: mặc định" />
 
@@ -175,13 +203,14 @@ export default function Diagnosis({ active }) {
           <label><input type="checkbox" checked={opts.mask} onChange={opt('mask')} /> Mask</label>
           <label><input type="checkbox" checked={opts.polygon} onChange={opt('polygon')} /> Polygon</label>
           <label><input type="checkbox" checked={opts.fdi} onChange={opt('fdi')} /> FDI</label>
-          <label title="Trục răng khôn, trục răng 7, mặt nhai, CEJ"><input type="checkbox" checked={opts.wisdom} onChange={opt('wisdom')} /> Răng khôn</label>
+          <label title="Trục răng khôn, trục răng 7, mặt nhai, CEJ"><input type="checkbox" checked={layers.wisdom} onChange={() => onStepAction('wisdom', 'visible')} /> Răng khôn</label>
           <label>Opacity <input type="range" min="0" max="1" step="0.05" value={opts.opacity} onChange={opt('opacity')} /></label>
           <span className="spacer" />
           <Dropdown className={`mode-dd ${mode}`} title="Chế độ" value={mode} options={MODES} onChange={setMode} align="right" />
           <button className="btn" onClick={save} disabled={mode !== 'edit' || !dirty || !job?.inference_id}>💾 Lưu</button>
         </div>
-        <ImageViewer src={src} teeth={doc.teeth} strokes={doc.strokes} opts={opts} editable={editable}
+        <ImageViewer src={src} teeth={doc.teeth} strokes={doc.strokes} editable={editable}
+          opts={{ ...opts, image: layers.input, teeth: layers.seg, wisdom: layers.wisdom }}
           hover={hover} onHover={setHover} onChange={change} onEditStart={snapshot} onUndo={undo} onRedo={redo}
           wisdom={job?.result.findings?.wisdom ?? []} />
       </section>
@@ -190,6 +219,17 @@ export default function Diagnosis({ active }) {
       <section className="panel right">
         <ResultPanel job={job} busy={busy} teeth={doc.teeth} hover={hover} onHover={setHover} msg={msg} />
       </section>
+
+      {openStep && (
+        <ConfigDialog step={openStep} fields={schema[cfgOpen]} values={stepCfg(cfgOpen)} canRun={!!file && !running}
+          onClose={() => setCfgOpen(null)}
+          onApply={(params, run) => {
+            const next = { ...cfg, [cfgOpen]: { ...cfg[cfgOpen], ...params } }
+            setCfg(next)
+            setCfgOpen(null)
+            if (run) start(file, next)
+          }} />
+      )}
     </div>
   )
 }

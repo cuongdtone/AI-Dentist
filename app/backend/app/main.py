@@ -1,7 +1,7 @@
 import json, os
 import cv2
 import numpy as np
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from . import auth, db, pipeline
 
@@ -21,7 +21,7 @@ class DocIn(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "model": os.path.exists(pipeline.MODEL_PATH), "steps": pipeline.STEPS}
+    return {"ok": True, "model": os.path.exists(pipeline.MODEL_PATH), "steps": pipeline.STEPS, "config": pipeline.CONFIG_SCHEMA}
 
 
 @app.post("/api/auth/login")
@@ -38,7 +38,11 @@ def stats(period: str = Query("day", pattern="^(day|week|month|year)$"), user=De
 
 
 @app.post("/api/jobs")
-async def create_job(file: UploadFile = File(...), user=Depends(auth.current_user)):
+async def create_job(file: UploadFile = File(...), config: str = Form("{}"), user=Depends(auth.current_user)):
+    try:
+        cfg = json.loads(config)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Config không phải JSON hợp lệ")
     data = await file.read()
     image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
@@ -47,7 +51,7 @@ async def create_job(file: UploadFile = File(...), user=Depends(auth.current_use
     path = f"{db.DATA_DIR}/images/{os.urandom(8).hex()}{ext}"
     with open(path, "wb") as f:
         f.write(data)
-    job = pipeline.start(image, file.filename, path, user)
+    job = pipeline.start(image, file.filename, path, user, cfg)
     return job.to_dict()
 
 
@@ -78,7 +82,9 @@ def save_edits(inf_id: int, body: DocIn, user=Depends(auth.current_user)):
         raise HTTPException(404, "Không tìm thấy kết quả")
     res = json.loads(row["result"])
     res["teeth"], res["strokes"] = body.teeth, body.strokes
-    # polygon răng 7/8 có thể đã sửa -> tính lại phân tích răng khôn cho khớp
-    res.setdefault("findings", {})["wisdom"] = pipeline.analyze_wisdom(body.teeth, res["width"], res["height"])
+    # polygon răng 7/8 có thể đã sửa -> tính lại phân tích răng khôn cho khớp (cùng config lúc chạy)
+    wcfg = pipeline.resolve_config(res.get("config"))["wisdom"]
+    if wcfg["enabled"]:
+        res.setdefault("findings", {})["wisdom"] = pipeline.analyze_wisdom(body.teeth, res["width"], res["height"], wcfg)
     db.q("UPDATE inferences SET result=?, teeth=? WHERE id=?", (json.dumps(res), len(body.teeth), inf_id))
     return {"ok": True, "findings": res["findings"]}

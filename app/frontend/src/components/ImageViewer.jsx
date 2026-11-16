@@ -175,8 +175,8 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
             ))}
           </defs>
           <g transform={`translate(${view.tx} ${view.ty}) scale(${view.s})`}>
-            <image href={src} width={size.w} height={size.h} style={{ imageRendering: view.s > 2 ? 'pixelated' : 'auto' }} />
-            <g opacity={opts.opacity}>
+            {opts.image !== false && <image href={src} width={size.w} height={size.h} style={{ imageRendering: view.s > 2 ? 'pixelated' : 'auto' }} />}
+            <g opacity={opts.opacity} display={opts.teeth === false ? 'none' : undefined}>
               {teeth.map((t) => {
                 const on = t.id === active
                 const c = toothColor(t.fdi)
