@@ -71,7 +71,22 @@ function WisdomOverlay({ items, px, active }) {
   )
 }
 
-export default function ImageViewer({ src, teeth, strokes, opts, editable, hover, onHover, onChange, onEditStart, onUndo, onRedo, wisdom = [] }) {
+/* Lớp vẽ vùng sâu răng (đỏ); vùng thuộc răng đang hover được tô đậm. Không bắt chuột để không cản sửa polygon răng. */
+function CariesOverlay({ items, active }) {
+  return (
+    <g className="caries-overlay">
+      {items.map((c) => {
+        const on = c.tooth_id === active
+        return (
+          <polygon key={c.id} points={c.polygon.join(' ')} fill="#ef4444" fillOpacity={on ? 0.55 : 0.3}
+            stroke={on ? '#fff' : '#ef4444'} strokeWidth={on ? 2 : 1.5} vectorEffect="non-scaling-stroke" />
+        )
+      })}
+    </g>
+  )
+}
+
+export default function ImageViewer({ src, teeth, strokes, opts, editable, hover, onHover, onChange, onEditStart, onUndo, onRedo, wisdom = [], caries = [] }) {
   const boxRef = useRef(null)
   const svgRef = useRef(null)
   const canvasRef = useRef(null)
@@ -204,6 +219,7 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
                 )
               })}
             </g>
+            {opts.caries && caries.length > 0 && <CariesOverlay items={caries} active={active} />}
             {opts.wisdom && wisdom.length > 0 && <WisdomOverlay items={wisdom} px={px} active={active} />}
           </g>
           {drawing && cursor && ( // vòng tròn xem trước cỡ bút
@@ -239,7 +255,8 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
       {size && (
         <div className="viewer-status">
           {editPoly && <span>Kéo đỉnh/cạnh để sửa · Chuột phải: xoá đỉnh · Ctrl+Z: hoàn tác</span>}
-          {hovered && <span>Răng {hovered.fdi} · {(hovered.conf * 100).toFixed(0)}% · {hovered.polygon.length} đỉnh</span>}
+          {hovered && <span>Răng {hovered.fdi} · {(hovered.conf * 100).toFixed(0)}% · {hovered.polygon.length} đỉnh
+            {caries.some((c) => c.tooth_id === hovered.id) && ` · sâu ${caries.filter((c) => c.tooth_id === hovered.id).length} vùng`}</span>}
           {cursor && <span>x {cursor[0].toFixed(0)}, y {cursor[1].toFixed(0)}</span>}
           <span>{(view.s * 100).toFixed(0)}%</span>
           <span>{size.w} × {size.h} px</span>

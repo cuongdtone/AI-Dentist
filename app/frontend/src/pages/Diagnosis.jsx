@@ -16,7 +16,7 @@ const MODES = [
 const DEFAULT_SIZES = { left: 16, right: 30 }
 const loadSizes = () => { try { return JSON.parse(localStorage.getItem('diagSizes')) ?? DEFAULT_SIZES } catch { return DEFAULT_SIZES } }
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
-const OVERLAY_STEPS = ['input', 'seg', 'wisdom'] // bước có lớp vẽ trên ảnh (Hide/Show)
+const OVERLAY_STEPS = ['input', 'seg', 'wisdom', 'caries'] // bước có lớp vẽ trên ảnh (Hide/Show)
 // Cấu hình bước {key: {enabled, ...params}}: nhớ theo trình duyệt, ghép với mặc định từ schema
 const loadCfg = () => { try { return JSON.parse(localStorage.getItem('stepCfg')) ?? {} } catch { return {} } }
 
@@ -25,7 +25,7 @@ export default function Diagnosis({ active }) {
   const [stepDefs, setStepDefs] = useState([])
   const [schema, setSchema] = useState({})
   const [cfg, setCfg] = useState(loadCfg)
-  const [layers, setLayers] = useState({ input: true, seg: true, wisdom: true }) // Hide/Show lớp vẽ
+  const [layers, setLayers] = useState({ input: true, seg: true, wisdom: true, caries: true }) // Hide/Show lớp vẽ
   const [cfgOpen, setCfgOpen] = useState(null) // key bước đang mở hộp cấu hình
   const [file, setFile] = useState(null)
   const [src, setSrc] = useState(null)
@@ -204,15 +204,16 @@ export default function Diagnosis({ active }) {
           <label><input type="checkbox" checked={opts.polygon} onChange={opt('polygon')} /> Polygon</label>
           <label><input type="checkbox" checked={opts.fdi} onChange={opt('fdi')} /> FDI</label>
           <label title="Trục răng khôn, trục răng 7, mặt nhai, CEJ"><input type="checkbox" checked={layers.wisdom} onChange={() => onStepAction('wisdom', 'visible')} /> Răng khôn</label>
+          <label title="Vùng sâu răng"><input type="checkbox" checked={layers.caries} onChange={() => onStepAction('caries', 'visible')} /> Sâu răng</label>
           <label>Opacity <input type="range" min="0" max="1" step="0.05" value={opts.opacity} onChange={opt('opacity')} /></label>
           <span className="spacer" />
           <Dropdown className={`mode-dd ${mode}`} title="Chế độ" value={mode} options={MODES} onChange={setMode} align="right" />
           <button className="btn" onClick={save} disabled={mode !== 'edit' || !dirty || !job?.inference_id}>💾 Lưu</button>
         </div>
         <ImageViewer src={src} teeth={doc.teeth} strokes={doc.strokes} editable={editable}
-          opts={{ ...opts, image: layers.input, teeth: layers.seg, wisdom: layers.wisdom }}
+          opts={{ ...opts, image: layers.input, teeth: layers.seg, wisdom: layers.wisdom, caries: layers.caries }}
           hover={hover} onHover={setHover} onChange={change} onEditStart={snapshot} onUndo={undo} onRedo={redo}
-          wisdom={job?.result.findings?.wisdom ?? []} />
+          wisdom={job?.result.findings?.wisdom ?? []} caries={job?.result.findings?.caries ?? []} />
       </section>
       <div className="splitter" onPointerDown={startResize('right')} onDoubleClick={() => setSizes(DEFAULT_SIZES)} title="Kéo để đổi kích thước · nhấp đúp: mặc định" />
 

@@ -43,3 +43,4 @@ research/wisdom-analysis/out_*/
 research/wisdom-analysis/features_*.csv
 review_result.json
 research/caries-seg/preview/
+research/caries-seg/data_align/

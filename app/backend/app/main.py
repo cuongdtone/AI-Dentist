@@ -21,7 +21,7 @@ class DocIn(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "model": os.path.exists(pipeline.MODEL_PATH), "steps": pipeline.STEPS, "config": pipeline.CONFIG_SCHEMA}
+    return {"ok": True, "model": os.path.exists(pipeline.MODEL_PATH), "caries_model": os.path.exists(pipeline.CARIES_MODEL_PATH), "steps": pipeline.STEPS, "config": pipeline.CONFIG_SCHEMA}
 
 
 @app.post("/api/auth/login")

@@ -20,8 +20,11 @@ app/
 
 ```bash
 cd app/scripts
-/mnt/work/tooth/wisdom_tooth/env/bin/python export_onnx.py   # mặc định lấy best.pt của yolo26s-seg_1024
+/mnt/work/tooth/wisdom_tooth/env/bin/python export_onnx.py --preset tooth    # -> backend/models/tooth_seg.onnx  (1024)
+/mnt/work/tooth/wisdom_tooth/env/bin/python export_onnx.py --preset caries   # -> backend/models/caries_seg.onnx (384, crop từng răng)
 ```
+Mặc định lấy `best.pt` của `research/tooth-detect/.../ft_finaldata_30` và `research/caries-seg/.../caries_384`; đổi bằng `--weights`.
+File cũ được sao lưu thành `*.prev.onnx`. Thiếu `caries_seg.onnx` thì bước Sâu răng báo "Chưa có model sâu răng" (không lỗi).
 
 Model được mount vào container (`./backend/models`), nên sau khi export lại chỉ cần `docker compose restart backend`.
 

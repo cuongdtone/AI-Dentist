@@ -42,10 +42,11 @@ def get_model() -> ToothSegmenter:
     return _load(MODEL_PATH)
 
 
-def get_caries_model() -> ToothSegmenter:
+def get_caries_model():
+    """-> (model, cấu hình cắt răng lúc train)."""
     if not os.path.exists(CARIES_MODEL_PATH):
         raise Skip("Chưa có model sâu răng")
-    return _load(CARIES_MODEL_PATH)
+    return _load(CARIES_MODEL_PATH), caries.load_crop_cfg(CARIES_MODEL_PATH)
 
 
 # ---------------- Cấu hình từng bước (UI tự sinh form từ schema này) ----------------
@@ -96,12 +97,10 @@ CONFIG_SCHEMA = {
         _n("mask_thr", "Ngưỡng mask", 0.1, 0.9, 0.05, 0.5,
            "Xác suất tối thiểu để một điểm ảnh thuộc vùng sâu. Tăng → viền vùng sâu co lại; giảm → nở ra."),
         _n("own_thr", "Tỉ lệ nằm trong răng", 0.1, 1.0, 0.05, 0.5,
-           "Mỗi răng được cắt riêng nên khung cắt có cả răng kề. Vùng sâu chỉ được gán cho răng nếu ≥ tỉ lệ này "
-           "diện tích nằm trong viền răng đó (phần còn lại do crop của răng kề xử lý). Giảm nếu vùng sâu ở mặt "
-           "tiếp giáp bị mất; tăng nếu một vùng sâu bị báo cho cả hai răng."),
-        _n("margin", "Lề khung cắt", 0.0, 0.4, 0.05, 0.15,
-           "Lề thêm quanh bbox răng khi cắt, tính theo tỉ lệ kích thước răng. Model được train với 0.15 — "
-           "đổi nhiều có thể làm giảm độ chính xác."),
+           "Mỗi răng được xoay thẳng và cắt riêng, nhưng mép khung vẫn lẫn một phần răng kề. Vùng sâu chỉ được gán "
+           "cho răng nếu ≥ tỉ lệ này diện tích nằm trong viền răng đó. Giảm nếu vùng sâu ở mặt tiếp giáp bị mất "
+           "(viền răng của model hơi hụt); tăng nếu một vùng sâu bị báo cho cả hai răng. "
+           "Cách cắt (xoay, lề) cố định theo lúc train, không chỉnh ở đây."),
         _n("min_area", "Diện tích tối thiểu (px)", 0, 2000, 10, 50,
            "Bỏ vùng sâu nhỏ hơn số pixel này (trên ảnh gốc) — thường là nhiễu."),
         _n("eps", "Độ rút gọn polygon (px)", 0.5, 5.0, 0.5, 1.0,
@@ -164,7 +163,8 @@ def step_wisdom(image, res, p):
 
 
 def step_caries(image, res, p):
-    res["findings"]["caries"] = caries.analyze_caries(get_caries_model(), image, res["teeth"], p)
+    model, crop_cfg = get_caries_model()
+    res["findings"]["caries"] = caries.analyze_caries(model, crop_cfg, image, res["teeth"], p)
 
 
 RUNNERS = {"seg": step_seg, "wisdom": step_wisdom, "caries": step_caries}  # bước chưa có -> "skipped"

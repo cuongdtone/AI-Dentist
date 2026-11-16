@@ -1,0 +1,7 @@
+{
+ "align": true,
+ "margin": 0.1,
+ "mask_outside": false,
+ "mask_dilate": 6,
+ "label": "own"
+}
