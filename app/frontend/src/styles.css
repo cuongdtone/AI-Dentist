@@ -181,6 +181,11 @@ body.resizing { cursor: col-resize; user-select: none; }
 .tooth.impacted { background: color-mix(in srgb, var(--danger) 55%, transparent); border: 1px solid var(--danger); color: #fff; }
 .tooth.caries::after { content: ''; position: absolute; top: 2px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 1px #000; }
 .tooth.impacted.active { background: var(--danger); color: #000; }
+.tooth.perio2 { border-bottom: 3px solid #f59e0b; }
+.tooth.perio3 { border-bottom: 3px solid #ef4444; }
+.chart-legend i.per, .chart-legend i.per3 { width: 10px; height: 3px; border-radius: 0; vertical-align: 2px; background: #f59e0b; }
+.chart-legend i.per3 { background: #ef4444; }
+.region-overlay .vertex, .region-overlay .edge-hit { pointer-events: all; }
 .chart-legend { display: flex; gap: 12px; justify-content: center; margin-top: 2px; }
 .chart-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; border-radius: 2px; }
 .chart-legend i.imp { background: color-mix(in srgb, var(--danger) 55%, transparent); border: 1px solid var(--danger); }

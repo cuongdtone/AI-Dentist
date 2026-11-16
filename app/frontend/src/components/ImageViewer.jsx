@@ -106,7 +106,74 @@ function CariesOverlay({ items, active, activeTooth, mask, px, edit, onEnter, on
   )
 }
 
-export default function ImageViewer({ src, teeth, strokes, opts, editable, hover, onHover, onChange, onEditStart, onUndo, onRedo, wisdom = [], caries = [] }) {
+/* Lớp vẽ vùng CEJ / xương nha chu (model perio-seg): viền tím = vùng thân răng (mép phía chân = CEJ),
+   viền cam = vùng giữa đỉnh xương 2 hàm. Hover bằng VIỀN (không chặn hover răng bên dưới); chế độ sửa: kéo đỉnh/cạnh. */
+const REGION_COLOR = { crown_upper: '#d946ef', crown_lower: '#d946ef', bone_window: '#f97316' }
+const REGION_VI = { crown_upper: 'Vùng thân răng hàm trên (mép = CEJ)', crown_lower: 'Vùng thân răng hàm dưới (mép = CEJ)', bone_window: 'Vùng giữa đỉnh xương 2 hàm' }
+function RegionOverlay({ items, active, mask, px, edit, onEnter, onLeave, onVertexDown, onEdgeDown }) {
+  return (
+    <g className="region-overlay">
+      {items.map((r) => {
+        const on = r.id === active, c = REGION_COLOR[r.kind] ?? '#fff', poly = r.polygon
+        return (
+          <g key={r.id} onPointerEnter={() => onEnter(r)} onPointerLeave={onLeave}>
+            <polygon points={poly.join(' ')} pointerEvents="none" vectorEffect="non-scaling-stroke"
+              fill={mask ? c : 'none'} fillOpacity={mask ? 0.12 : 0} stroke={on ? '#fff' : c} strokeOpacity={on ? 1 : 0.85}
+              strokeWidth={on ? 2.5 : 1.5} strokeDasharray={r.kind === 'bone_window' ? undefined : '6 3'} />
+            <polygon points={poly.join(' ')} pointerEvents="stroke" fill="none" stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" />
+            {on && edit && poly.map((p, i) => {
+              const q = poly[(i + 1) % poly.length]
+              return <line key={`e${i}`} className="edge-hit" x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]}
+                stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" onPointerDown={(e) => onEdgeDown(e, r.id, i)} />
+            })}
+            {on && edit && poly.map((p, i) => (
+              <circle key={i} cx={p[0]} cy={p[1]} r={4 * px} fill="#fff" stroke={c} strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke" className="vertex" onPointerDown={(e) => onVertexDown(e, r.id, i)} />
+            ))}
+          </g>
+        )
+      })}
+    </g>
+  )
+}
+
+/* Điểm CEJ (tím) + đỉnh xương (cam) mặt gần/xa từng răng; đoạn CEJ→đỉnh xương màu theo giai đoạn tiêu xương.
+   showPerio=false -> chỉ điểm CEJ. Nhãn % hiện cho răng giai đoạn ≥ II hoặc răng đang hover. */
+export const STAGE_COLOR = { 1: '#22c55e', 2: '#f59e0b', 3: '#ef4444' }
+function PerioOverlay({ cej, perio, showCej, showPerio, active, px }) {
+  const sides = ['mesial', 'distal']
+  return (
+    <g className="perio-overlay" pointerEvents="none">
+      {showPerio && perio.map((m) => {
+        const on = m.tooth_id === active, col = STAGE_COLOR[m.stage]
+        const S = sides.map((k) => m[k]).filter(Boolean)
+        const mx = S.reduce((a, s) => a + s.crest[0] / S.length, 0), my = S.reduce((a, s) => a + s.crest[1] / S.length, 0)
+        const dx = m.apex[0] - mx, dy = m.apex[1] - my, dl = Math.hypot(dx, dy) || 1
+        return (
+          <g key={m.tooth_id ?? m.fdi}>
+            {S.map((s, i) => (
+              <g key={i}>
+                <line x1={s.cej[0]} y1={s.cej[1]} x2={s.crest[0]} y2={s.crest[1]} stroke={col} strokeWidth={on ? 4 : 3} vectorEffect="non-scaling-stroke" />
+                <circle cx={s.crest[0]} cy={s.crest[1]} r={(on ? 3.5 : 2.5) * px} fill="#f97316" stroke="#000" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+              </g>
+            ))}
+            {(on || m.stage >= 2) && (
+              <text x={mx + (dx / dl) * 16 * px} y={my + (dy / dl) * 16 * px} className="fdi" fontSize={(on ? 13 : 11) * px} strokeWidth={3 * px} fill={col}>
+                {Math.round(m.rbl * 100)}%{m.angular ? '∠' : ''}
+              </text>
+            )}
+          </g>
+        )
+      })}
+      {showCej && cej.map((c) => sides.map((k) => c[k] && (
+        <circle key={`${c.tooth_id}-${k}`} cx={c[k][0]} cy={c[k][1]} r={(c.tooth_id === active ? 3.5 : 2.5) * px}
+          fill="#d946ef" stroke="#000" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+      )))}
+    </g>
+  )
+}
+
+export default function ImageViewer({ src, teeth, strokes, opts, editable, hover, onHover, onChange, onEditStart, onUndo, onRedo, wisdom = [], caries = [], regions = [], cej = [], perio = [] }) {
   const boxRef = useRef(null)
   const svgRef = useRef(null)
   const canvasRef = useRef(null)
@@ -118,6 +185,7 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
   const [tool, setTool] = useState('hand')
   const [brush, setBrush] = useState({ color: COLORS[0], width: 4 })
   const [hc, setHc] = useState(null) // id vùng sâu đang hover
+  const [hr, setHr] = useState(null) // id vùng CEJ / xương đang hover
   const editPoly = editable && tool === 'hand'
   const drawing = editable && tool !== 'hand'
 
@@ -161,6 +229,7 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
   // kind 'tooth' | 'caries'; sửa vùng sâu -> cập nhật lại diện tích + tỉ lệ so với răng
   const setPoly = (id, fn, kind = 'tooth') => onChange((d) => (kind === 'tooth'
     ? { teeth: d.teeth.map((t) => (t.id === id ? { ...t, polygon: fn(t.polygon) } : t)) }
+    : kind === 'region' ? { regions: d.regions.map((r) => (r.id === id ? { ...r, polygon: fn(r.polygon) } : r)) }
     : {
         caries: d.caries.map((c) => {
           if (c.id !== id) return c
@@ -203,12 +272,15 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
     else setPoly(d.id, (poly) => poly.map((q, i) => (i === d.idx ? p : q)), d.kind)
   }
 
-  const dc = drag.current?.kind === 'caries'
-  const active = dc ? hover : drag.current?.id ?? hover
-  const activeC = dc ? drag.current.id : hc
+  const dk = drag.current?.kind
+  const active = dk === 'caries' || dk === 'region' ? hover : drag.current?.id ?? hover
+  const activeC = dk === 'caries' ? drag.current.id : hc
+  const activeR = dk === 'region' ? drag.current.id : hr
   const px = 1 / view.s // 1 pixel màn hình theo đơn vị ảnh
   const hovered = teeth.find((t) => t.id === active)
   const hoveredC = caries.find((c) => c.id === activeC)
+  const hoveredR = regions.find((r) => r.id === activeR)
+  const hoveredP = perio.find((m) => m.tooth_id === active)
 
   return (
     <div className="viewer" ref={boxRef}>
@@ -253,6 +325,14 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
                 )
               })}
             </g>
+            {opts.cej && regions.length > 0 && (
+              <RegionOverlay items={regions} active={activeR} mask={opts.mask} px={px} edit={editPoly}
+                onEnter={(r) => setHr(r.id)} onLeave={() => setHr(null)}
+                onVertexDown={(e, id, i) => onVertexDown(e, id, i, 'region')} onEdgeDown={(e, id, i) => onEdgeDown(e, id, i, 'region')} />
+            )}
+            {(opts.cej || opts.perio) && (cej.length > 0 || perio.length > 0) && (
+              <PerioOverlay cej={cej} perio={perio} showCej={opts.cej} showPerio={opts.perio} active={active} px={px} />
+            )}
             {opts.caries && caries.length > 0 && (
               <CariesOverlay items={caries} active={activeC} activeTooth={active} mask={opts.mask} px={px} edit={editPoly}
                 onEnter={(c) => { setHc(c.id); onHover(c.tooth_id) }} onLeave={() => { setHc(null); onHover(null) }}
@@ -293,6 +373,9 @@ export default function ImageViewer({ src, teeth, strokes, opts, editable, hover
       {size && (
         <div className="viewer-status">
           {editPoly && <span>Kéo đỉnh/cạnh để sửa · Chuột phải: xoá đỉnh · Ctrl+Z: hoàn tác</span>}
+          {hoveredR && <span>{REGION_VI[hoveredR.kind]} · {(hoveredR.conf * 100).toFixed(0)}% · {hoveredR.polygon.length} đỉnh</span>}
+          {hoveredP && opts.perio && <span>Tiêu xương {hoveredP.fdi}: {Math.round(hoveredP.rbl * 100)}%
+            {hoveredP.mesial && ` (gần ${Math.round(hoveredP.mesial.rbl * 100)}%`}{hoveredP.distal && `${hoveredP.mesial ? ', ' : ' ('}xa ${Math.round(hoveredP.distal.rbl * 100)}%`}{(hoveredP.mesial || hoveredP.distal) && ')'}</span>}
           {hoveredC && <span>Sâu răng {hoveredC.fdi} · {(hoveredC.conf * 100).toFixed(0)}% · {(hoveredC.tooth_frac * 100).toFixed(0)}% diện tích răng</span>}
           {hovered && !hoveredC && <span>Răng {hovered.fdi} · {(hovered.conf * 100).toFixed(0)}% · {hovered.polygon.length} đỉnh
             {caries.some((c) => c.tooth_id === hovered.id) && ` · sâu ${caries.filter((c) => c.tooth_id === hovered.id).length} vùng`}</span>}

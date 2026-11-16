@@ -1,7 +1,8 @@
 """Đánh giá end-to-end pipeline của webapp trên final_data: ảnh -> phân đoạn răng -> răng khôn -> sâu răng.
 Chạy ĐÚNG code backend (app/backend/app: ToothSegmenter ONNX, analyze_wisdom, analyze_caries) với config mặc định.
 
-Model: luôn lấy best.pt MỚI NHẤT (theo mtime) trong research/tooth-detect/runs và research/caries-seg/runs,
+Model: luôn lấy best.pt MỚI NHẤT (theo mtime) trong research/tooth-detect/runs, research/caries-seg/runs và
+research/perio-seg/runs (CEJ + mức xương; chưa có run -> bỏ qua phần nha chu),
 export sang ONNX (cache theo tên run + mtime trong cache/onnx) -> giống hệt cách app chạy.
 
 Dùng:
@@ -15,7 +16,10 @@ Ra: out/<tooth_run>__<caries_run>/
   report.md, report.json, wisdom_teeth.csv, caries_teeth.csv, caries_lesions.csv
 
 Nhãn final_data (Supervisely): 'Sau rang (polygon)' = vùng sâu; 'Rang khon ham duoi lech ngam' = box (chỉ hàm dưới);
-'Truc rang' (polyline khép kín) = viền răng (không có số FDI, chỉ để vẽ). Ảnh trùng hash chỉ tính 1 lần.
+'Truc rang' (polyline khép kín) = viền răng (không có số FDI, chỉ để vẽ); 'Muc CEJ' (2 vòng = vùng thân răng trên/dưới)
++ 'Muc xuong nha chu' (1 vòng = vùng giữa đỉnh xương 2 hàm). Ảnh trùng hash chỉ tính 1 lần.
+Nha chu: đo CEJ / đỉnh xương / % tiêu xương bằng app/backend/app/perio_geom.py trên CÙNG polygon răng của app cho cả
+vùng bác sĩ (GT) và vùng model -> sai số chỉ do model vùng.
 Split train/val/test theo wisdom_tooth/data (test không dùng để train model răng lẫn model sâu răng) -> số liệu chính = test.
 """
 import argparse, colorsys, csv, glob, json, math, os, re, shutil, sys, time
@@ -30,20 +34,22 @@ ROOT = HERE.parents[1]
 BACKEND = ROOT / "app/backend"
 os.environ.setdefault("DATA_DIR", str(HERE / "cache/appdata"))  # app.db (import pipeline -> db) không lẫn vào app thật
 sys.path.insert(0, str(BACKEND))
-from app import pipeline  # noqa: E402
-from app.caries import analyze_caries, load_crop_cfg  # noqa: E402
-from app.model import ToothSegmenter  # noqa: E402
+from app import perio_geom, pipeline  # noqa: E402
+from app.caries import load_crop_cfg  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 CARIES_CLS, WISDOM_CLS, CONTOUR_CLS = "Sau rang (polygon)", "Rang khon ham duoi lech ngam", "Truc rang"
+CEJ_CLS, BONE_CLS = "Muc CEJ", "Muc xuong nha chu"
 SPLITS = ("test", "val", "train")
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
 # ---------------------------------------------------------------- model
-def latest_best(pattern):
+def latest_best(pattern, required=True):
     c = glob.glob(str(ROOT / pattern), recursive=True)
     if not c:
+        if not required:
+            return None
         sys.exit(f"Không thấy weights: {pattern}")
     return Path(max(c, key=os.path.getmtime))
 
@@ -58,7 +64,7 @@ def export_onnx(weights, kind):
     """.pt -> cache/onnx/<run>_<mtime>.onnx (export 1 lần). caries: chép crop.json của dataset thành <onnx>.json."""
     weights = Path(weights)
     run = weights.resolve().parents[1].name
-    imgsz = int(run_arg(weights, "imgsz") or (1024 if kind == "tooth" else 384))
+    imgsz = int(run_arg(weights, "imgsz") or (384 if kind == "caries" else 1024))
     out = HERE / "cache/onnx" / f"{kind}_{run}_{int(weights.stat().st_mtime)}_{imgsz}.onnx"
     if not out.exists():
         from ultralytics import YOLO
@@ -100,7 +106,7 @@ def collect(src):
                 continue
             seen.add(h)
             ann = json.load(open(d / "ann" / f, encoding="utf8"))
-            car, box, cont = [], [], []
+            car, box, cont, cej, bone = [], [], [], [], []
             for o in ann["objects"]:
                 pts = o["points"]["exterior"]
                 if o["classTitle"] == CARIES_CLS and len(pts) >= 3:
@@ -110,9 +116,18 @@ def collect(src):
                     box.append((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
                 elif o["classTitle"] == CONTOUR_CLS and len(pts) >= 3:
                     cont.append(pts)
+                elif o["classTitle"] == CEJ_CLS and len(pts) >= 3:
+                    cej.append(pts)
+                elif o["classTitle"] == BONE_CLS and len(pts) >= 3:
+                    bone.append(pts)
+            regions = None  # như research/perio-seg/prepare_data.py: cần đúng 2 vòng CEJ + 1 vòng xương
+            if len(cej) == 2 and len(bone) == 1:
+                up, lo = sorted(cej, key=lambda p: np.mean([q[1] for q in p]))
+                regions = [{"id": i, "kind": k, "conf": 1.0, "polygon": [[float(x), float(y)] for x, y in q]}
+                           for i, (k, q) in enumerate(zip(perio_geom.KINDS, (up, lo, bone[0])))]
             stem = f"{doc}_{os.path.splitext(name)[0]}"
             items.append(dict(doc=doc, name=name, stem=stem, split=split.get(stem, "unknown"), img=str(d / "img" / name),
-                              caries=car, boxes=box, contours=cont))
+                              caries=car, boxes=box, contours=cont, regions=regions))
     return items
 
 
@@ -204,6 +219,71 @@ def eval_image(it, pred, a):
     return r
 
 
+def region_iou(a, b, W, H, f=0.25):
+    """IoU 2 polygon trên lưới thu nhỏ (nhanh, đủ chính xác cho vùng lớn)."""
+    w, h = max(1, int(W * f)), max(1, int(H * f))
+    ma, mb = poly_mask([np.asarray(a) * f], 0, 0, w, h), poly_mask([np.asarray(b) * f], 0, 0, w, h)
+    return float((ma & mb).sum() / max((ma | mb).sum(), 1))
+
+
+def eval_perio(it, pred, cfg, W, H):
+    """GT = perio_geom trên vùng bác sĩ + polygon răng của app; so với kết quả app (vùng model)."""
+    if not it["regions"] or "perio" not in pred:
+        return None
+    gt = {m["tooth_id"]: m for m in perio_geom.measure(pred["teeth"], it["regions"], cfg)}
+    pm = {m["tooth_id"]: m for m in pred["perio"]}
+    P = perio_geom.regions_by_kind(pred["regions"])
+    G = perio_geom.regions_by_kind(it["regions"])
+    ious = {k: (region_iou(G[k], P[k], W, H) if k in P else 0.0) for k in perio_geom.KINDS}
+    teeth, sides = [], []
+    for tid, g in gt.items():
+        p = pm.get(tid)
+        teeth.append(dict(fdi=g["fdi"], gt_rbl=g["rbl"], gt_stage=g["stage"], pred_rbl=p["rbl"] if p else "", pred_stage=p["stage"] if p else ""))
+        if not p:
+            continue
+        for s in ("mesial", "distal"):
+            if g.get(s) and p.get(s):
+                d = lambda k: float(np.hypot(*(np.asarray(g[s][k]) - p[s][k])))
+                sides.append(dict(fdi=g["fdi"], side=s, cej_err=round(d("cej"), 1), crest_err=round(d("crest"), 1),
+                                  gt_rbl=g[s]["rbl"], pred_rbl=p[s]["rbl"]))
+    return dict(iou=ious, teeth=teeth, sides=sides, gt=list(gt.values()))
+
+
+def kappa_w(y, yh, k=3):
+    """Cohen's kappa trọng số bậc 2 cho giai đoạn 1..k."""
+    y, yh = np.asarray(y, int) - 1, np.asarray(yh, int) - 1
+    if not len(y):
+        return 0.0
+    O = np.zeros((k, k))
+    for a, b in zip(y, yh):
+        O[a, b] += 1
+    E = np.outer(O.sum(1), O.sum(0)) / O.sum()
+    Wt = np.array([[(i - j) ** 2 for j in range(k)] for i in range(k)]) / (k - 1) ** 2
+    return float(1 - (Wt * O).sum() / max((Wt * E).sum(), 1e-9))
+
+
+def perio_stats(S):
+    S = [r["perio"] for r in S if r.get("perio")]
+    if not S:
+        return None
+    ious = {k: round(float(np.mean([r["iou"][k] for r in S])), 4) for k in perio_geom.KINDS}
+    sides = [x for r in S for x in r["sides"]]
+    teeth = [t for r in S for t in r["teeth"]]
+    both = [t for t in teeth if t["pred_stage"] != ""]
+    pct = lambda a, q: round(float(np.percentile(a, q)), 1) if len(a) else None
+    ce, cr = [x["cej_err"] for x in sides], [x["crest_err"] for x in sides]
+    return dict(
+        images=len(S), region_iou=ious, teeth_gt=len(teeth), teeth_both=len(both), sides=len(sides),
+        cej_err_px=dict(median=pct(ce, 50), mean=round(float(np.mean(ce)), 1) if ce else None, p90=pct(ce, 90)),
+        crest_err_px=dict(median=pct(cr, 50), mean=round(float(np.mean(cr)), 1) if cr else None, p90=pct(cr, 90)),
+        rbl_mae=round(float(np.mean([abs(t["gt_rbl"] - t["pred_rbl"]) for t in both])), 4) if both else None,
+        stage_acc=round(float(np.mean([t["gt_stage"] == t["pred_stage"] for t in both])), 4) if both else None,
+        stage_kappa=round(kappa_w([t["gt_stage"] for t in both], [t["pred_stage"] for t in both]), 4) if both else None,
+        stage_confusion=[[sum(1 for t in both if t["gt_stage"] == a and t["pred_stage"] == b) for b in (1, 2, 3)] for a in (1, 2, 3)],
+        stage2plus=prf([int(t["gt_stage"] >= 2) for t in both], [int(t["pred_stage"] >= 2) for t in both]),
+    )
+
+
 def prf(y, yh):
     y, yh = np.asarray(y, int), np.asarray(yh, int)
     tp = int(((y == 1) & (yh == 1)).sum()); fp = int(((y == 0) & (yh == 1)).sum())
@@ -278,9 +358,36 @@ class Painter:
         self.img[:] = np.asarray(im)[:, :, ::-1]
 
 
+STAGE_BGR = {1: (94, 197, 34), 2: (11, 158, 245), 3: (68, 68, 239)}
+CEJ_BGR, CREST_BGR = (239, 70, 217), (22, 115, 249)
+
+
+def draw_perio(P, regions, meas, scale):
+    """Như webapp: viền vùng thân răng (tím, đứt nét) + vùng xương (cam); đoạn CEJ->đỉnh xương màu theo giai đoạn, % cho GĐ >= II."""
+    for r in regions or []:
+        p = np.asarray(r["polygon"], float)
+        if r["kind"] == "bone_window":
+            P.poly(p, CREST_BGR, 0.8, alpha=0.85)
+        else:  # đứt nét
+            for a, b in zip(p, np.roll(p, -1, 0)):
+                P.line(a, b, CEJ_BGR, 0.8, dash=(6, 3))
+    for m in meas or []:
+        S = [m[k] for k in ("mesial", "distal") if m.get(k)]
+        col = STAGE_BGR[m["stage"]]
+        for s in S:
+            P.line(s["cej"], s["crest"], col, 1.5)
+            cv2.circle(P.img, tuple(np.round(s["cej"]).astype(int)), max(2, round(3 * scale)), CEJ_BGR, -1, cv2.LINE_AA)
+            cv2.circle(P.img, tuple(np.round(s["crest"]).astype(int)), max(2, round(3 * scale)), CREST_BGR, -1, cv2.LINE_AA)
+        if m["stage"] >= 2 and S:
+            mx, my = np.mean([s["crest"] for s in S], 0)
+            d = np.asarray(m["apex"]) - [mx, my]; d = d / max(np.linalg.norm(d), 1)
+            P.text((mx + d[0] * 18 * scale, my + d[1] * 18 * scale), f"{round(m['rbl'] * 100)}%{'∠' if m['angular'] else ''}", 12, col)
+
+
 def draw_pred(img, pred, scale, hl=None):
     """Như ImageViewer: polygon răng màu theo cung hàm + FDI, vùng sâu viền đỏ + conf, trục răng khôn."""
     out = img.copy(); P = Painter(out, scale)
+    draw_perio(P, pred.get("regions"), pred.get("perio"), scale)
     for t in pred["teeth"]:
         c = tooth_color(t["fdi"])
         P.poly(t["polygon"], c, 1.0, alpha=0.75)
@@ -314,8 +421,9 @@ def draw_pred(img, pred, scale, hl=None):
     return out
 
 
-def draw_gt(img, it, scale):
+def draw_gt(img, it, scale, gt_perio=None):
     out = img.copy(); P = Painter(out, scale)
+    draw_perio(P, it["regions"], gt_perio, scale)
     for c in it["contours"]:
         P.poly(c, (210, 210, 210), 0.8, alpha=0.45)
     for c in it["caries"]:
@@ -340,15 +448,19 @@ def header(w, lines, scale, color=(30, 30, 30)):
 def combine(img, it, pred, ev, a):
     H, W = img.shape[:2]
     scale = max(1.0, W / 1400)  # nét / chữ theo cỡ ảnh (webapp vẽ theo pixel màn hình)
-    left, right = draw_gt(img, it, scale), draw_pred(img, pred, scale, ev["pred_matched"])
+    pe = ev.get("perio")
+    left, right = draw_gt(img, it, scale, pe["gt"] if pe else None), draw_pred(img, pred, scale, ev["pred_matched"])
+    n2 = lambda L: sum(1 for m in L if m["stage"] >= 2)
     nt = len({c["tooth_id"] for c in pred["caries"]})
     imp = [w["fdi"] for w in pred["wisdom"] if w.get("impacted")]
     tp = len(ev["gt_matched"])
     hl = [f"NHÃN BÁC SĨ · {it['split']} · {it['doc']}/{it['name']}",
-          f"Sâu răng: {len(it['caries'])} vùng · Răng khôn lệch ngầm: {len(it['boxes'])} box"]
+          f"Sâu răng: {len(it['caries'])} vùng · Răng khôn lệch ngầm: {len(it['boxes'])} box"
+          + (f" · Tiêu xương ≥ II: {n2(pe['gt'])} răng" if pe else " · Không có nhãn CEJ/xương" if "perio" in pred else "")]
     hr = [f"DỰ ĐOÁN · {len(pred['teeth'])} răng",
           f"Sâu răng: {len(pred['caries'])} vùng / {nt} răng (khớp {tp}/{len(it['caries'])} nhãn, IoU≥{a.car_iou}) · "
-          f"Ngầm/lệch: {', '.join(imp) if imp else 'không'}"]
+          f"Ngầm/lệch: {', '.join(imp) if imp else 'không'}"
+          + (f" · Tiêu xương ≥ II: {n2(pred['perio'])} răng" if "perio" in pred else "")]
     sep = np.full((H, max(4, round(6 * scale)), 3), 255, np.uint8)
     hdr = np.hstack([header(W, hl, scale), np.full((round(34 * scale) * 2 + round(12 * scale), sep.shape[1], 3), 255, np.uint8), header(W, hr, scale)])
     out = np.vstack([hdr, np.hstack([left, sep, right])])
@@ -383,6 +495,7 @@ def summarize(rows_by_split, extra):
                         gt_boxes_detected_impacted=sum(r["wis_box_tp"] for r in R)),
             caries_labeled_images=car_stats(lab),
             caries_all_images=car_stats(R),
+            perio=perio_stats(R),
         )
     rep.update(extra)
     return rep
@@ -424,9 +537,32 @@ def write_md(rep, path, a):
             L.append(f"| {s} | {c['images']} | {c['gt_lesions']} | {c['pred_lesions']} | {l['precision']:.3f} | {l['recall']:.3f} | {l['f1']:.3f} | {c['gt_lesions_no_tooth']} |")
         L += ["", "**Mức ảnh** — có / không có sâu răng.", "", H]
         L += [f"| {s} | {fmt(rep[s][key]['image'])} |" for s in splits]
+    if any(rep[s].get("perio") for s in splits):
+        L += ["", "## Mức CEJ + tiêu xương nha chu", "",
+              f"Model vùng: `{rep.get('perio_weights')}`. GT = `perio_geom` trên vùng bác sĩ (2 vòng CEJ + 1 vòng xương) và CÙNG polygon răng của app "
+              "→ sai số chỉ do model vùng. Sai số điểm tính bằng px trên ảnh gốc (~0.1 mm/px trên phim toàn cảnh, tuỳ máy).", "",
+              "| Split | Ảnh | IoU thân răng trên | IoU thân răng dưới | IoU vùng xương | Sai số CEJ px (median / p90) | Sai số đỉnh xương px (median / p90) | MAE % tiêu xương | Đúng giai đoạn | Kappa (w) |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+        for s in splits:
+            q = rep[s].get("perio")
+            if q:
+                i = q["region_iou"]
+                L.append(f"| {s} | {q['images']} | {i['crown_upper']:.3f} | {i['crown_lower']:.3f} | {i['bone_window']:.3f} | "
+                         f"{q['cej_err_px']['median']} / {q['cej_err_px']['p90']} | {q['crest_err_px']['median']} / {q['crest_err_px']['p90']} | "
+                         f"{q['rbl_mae'] * 100:.1f} | {q['stage_acc']:.3f} | {q['stage_kappa']:.3f} |")
+        L += ["", "Răng tiêu xương giai đoạn ≥ II (≥ 15%):", "", H]
+        L += [f"| {s} | {fmt(rep[s]['perio']['stage2plus'])} |" for s in splits if rep[s].get("perio")]
+        if rep.get("test", {}).get("perio"):
+            c = rep["test"]["perio"]["stage_confusion"]
+            L += ["", "Ma trận giai đoạn (test; hàng = GT, cột = dự đoán):", "", "| GT \\ dự đoán | I | II | III/IV |", "|---|---|---|---|"]
+            L += [f"| {n} | {r[0]} | {r[1]} | {r[2]} |" for n, r in zip(("I", "II", "III/IV"), c)]
+    elif rep.get("perio_weights") is None:
+        L += ["", "## Mức CEJ + tiêu xương nha chu", "", "Chưa có model (research/perio-seg/runs/**/best.pt) → bỏ qua."]
     L += ["", "## Ảnh combine", "", "`vis/<split>/<doc>_<ảnh>.jpg` — trái: nhãn bác sĩ (viền răng xám, vùng sâu đỏ, box răng khôn lệch ngầm đỏ); "
           "phải: dự đoán như webapp (polygon răng màu theo cung hàm + FDI, vùng sâu viền đỏ + conf, ✗ = không khớp nhãn; "
-          "trục răng khôn đỏ = ngầm/lệch, xanh lá = bình thường, trục răng 7 xanh dương đứt nét, mặt nhai vàng, CEJ tím)."]
+          "trục răng khôn đỏ = ngầm/lệch, xanh lá = bình thường, trục răng 7 xanh dương đứt nét, mặt nhai vàng, CEJ tím). "
+          "Nha chu (cả 2 bên): viền tím đứt nét = vùng thân răng, viền cam = vùng xương; chấm tím = CEJ, chấm cam = đỉnh xương; "
+          "đoạn nối xanh/cam/đỏ = giai đoạn I/II/III, % hiện cho GĐ ≥ II (∠ = dạng góc)."]
     Path(path).write_text("\n".join(L) + "\n", encoding="utf8")
 
 
@@ -436,6 +572,7 @@ def main():
     ap.add_argument("--src", default=str(ROOT / "final_data"))
     ap.add_argument("--tooth-weights", help="mặc định: best.pt mới nhất trong research/tooth-detect/runs")
     ap.add_argument("--caries-weights", help="mặc định: best.pt mới nhất trong research/caries-seg/runs")
+    ap.add_argument("--perio-weights", help="mặc định: best.pt mới nhất trong research/perio-seg/runs (không có -> bỏ qua nha chu)")
     ap.add_argument("--out", default=str(HERE / "out"))
     ap.add_argument("--splits", default="test,val,train", help="split cần chạy")
     ap.add_argument("--limit", type=int, default=0)
@@ -448,22 +585,28 @@ def main():
 
     tw = Path(a.tooth_weights) if a.tooth_weights else latest_best("research/tooth-detect/runs/**/weights/best.pt")
     cw = Path(a.caries_weights) if a.caries_weights else latest_best("research/caries-seg/runs/**/weights/best.pt")
+    pw = Path(a.perio_weights) if a.perio_weights else latest_best("research/perio-seg/runs/**/weights/best.pt", required=False)
     t_onnx, t_run = export_onnx(tw, "tooth")
     c_onnx, c_run = export_onnx(cw, "caries")
-    tag = f"{t_run}__{c_run}"
-    print(f"Model răng: {tw}\nModel sâu răng: {cw}\n-> {tag}", flush=True)
-    seg, cmodel, crop_cfg = ToothSegmenter(str(t_onnx)), ToothSegmenter(str(c_onnx)), load_crop_cfg(str(c_onnx))
+    p_onnx, p_run = export_onnx(pw, "perio") if pw else (None, None)
+    tag = f"{t_run}__{c_run}" + (f"__{p_run}" if p_run else "")
+    print(f"Model răng: {tw}\nModel sâu răng: {cw}\nModel CEJ/xương: {pw or 'chưa có -> bỏ qua'}\n-> {tag}", flush=True)
+    # chạy y như app: trỏ đường dẫn model của pipeline vào ONNX vừa export, gọi lần lượt các bước theo STEPS
+    pipeline.MODEL_PATH, pipeline.CARIES_MODEL_PATH = str(t_onnx), str(c_onnx)
+    pipeline.PERIO_MODEL_PATH = str(p_onnx) if p_onnx else str(HERE / "cache/onnx/_none.onnx")
     cfg = pipeline.resolve_config(None)
+    if not p_onnx:
+        cfg["cej"]["enabled"] = cfg["perio"]["enabled"] = False
 
     out = Path(a.out) / tag
-    pcache = HERE / "cache/pred" / f"{t_onnx.stem}__{c_onnx.stem}"
+    pcache = HERE / "cache/pred" / (f"{t_onnx.stem}__{c_onnx.stem}" + (f"__{p_onnx.stem}" if p_onnx else ""))
     pcache.mkdir(parents=True, exist_ok=True)
     want = a.splits.split(",")
     items = [it for it in collect(a.src) if it["split"] in want][: a.limit or None]
     print(f"{len(items)} ảnh ({Counter(it['split'] for it in items)})", flush=True)
 
     t0, results = time.time(), []
-    wrows, crows, lrows = [], [], []
+    wrows, crows, lrows, prows = [], [], [], []
     for k, it in enumerate(items):
         img = cv2.imread(it["img"], cv2.IMREAD_COLOR)
         if img is None:
@@ -473,12 +616,17 @@ def main():
         if cp.exists() and not a.no_cache:
             pred = json.load(open(cp))
         else:
-            p = cfg["seg"]
-            teeth = seg(img, conf=p["conf"], iou=p["iou"], mask_thr=p["mask_thr"], ios_thr=p["ios_thr"], eps=p["eps"])
-            pred = dict(teeth=teeth, wisdom=pipeline.analyze_wisdom(teeth, W, H, cfg["wisdom"]),
-                        caries=analyze_caries(cmodel, crop_cfg, img, teeth, cfg["caries"]))
+            res = {"width": W, "height": H, "teeth": [], "regions": [], "findings": {}, "config": cfg}
+            for key, _ in pipeline.STEPS:
+                if cfg[key]["enabled"] and key in pipeline.RUNNERS:
+                    pipeline.RUNNERS[key](img, res, cfg[key])
+            f = res["findings"]
+            pred = dict(teeth=res["teeth"], wisdom=f.get("wisdom", []), caries=f.get("caries", []))
+            if p_onnx:
+                pred.update(regions=res["regions"], cej=f.get("cej", []), perio=f.get("perio", []))
             json.dump(pred, open(cp, "w"))
         ev = eval_image(it, pred, a)
+        ev["perio"] = eval_perio(it, pred, cfg["perio"], W, H)
         # box răng khôn được app phát hiện đúng: box khớp 1 răng app kết luận ngầm/lệch
         ev["wis_box_tp"] = 0
         for j, b in enumerate(it["boxes"]):
@@ -495,6 +643,8 @@ def main():
         wrows += [{**base, **w} for w in ev["wisdom"]]
         crows += [{**base, "caries_labeled": int(len(it["caries"]) > 0), **c} for c in ev["caries_teeth"]]
         lrows += [{**base, **l} for l in ev["lesions"]]
+        if ev["perio"]:
+            prows += [{**base, **x} for x in ev["perio"]["sides"]]
         if not a.no_vis:
             d = out / "vis" / it["split"]; d.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(d / f"{it['stem']}.jpg"), combine(img, it, pred, ev, a), [cv2.IMWRITE_JPEG_QUALITY, 88])
@@ -502,15 +652,16 @@ def main():
             print(f"  {k + 1}/{len(items)} ảnh · {time.time() - t0:.0f}s", flush=True)
 
     out.mkdir(parents=True, exist_ok=True)
-    for name, rows in (("wisdom_teeth", wrows), ("caries_teeth", crows), ("caries_lesions", lrows)):
+    for name, rows in (("wisdom_teeth", wrows), ("caries_teeth", crows), ("caries_lesions", lrows), ("perio_sides", prows)):
         if rows:
             with open(out / f"{name}.csv", "w", newline="") as fh:
                 w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
     groups = {s: [r for r in results if r["split"] == s] for s in want if any(r["split"] == s for r in results)}
     groups["all"] = results
     rep = summarize(groups, dict(tag=tag, date=time.strftime("%Y-%m-%d %H:%M"), n_images=len(results), seconds=time.time() - t0,
-                                 tooth_weights=str(tw.relative_to(ROOT)), caries_weights=str(cw.relative_to(ROOT)), crop_cfg=crop_cfg,
-                                 config={k: cfg[k] for k in ("seg", "wisdom", "caries")}, wis_iou=a.wis_iou, car_iou=a.car_iou))
+                                 tooth_weights=str(tw.relative_to(ROOT)), caries_weights=str(cw.relative_to(ROOT)),
+                                 perio_weights=str(pw.relative_to(ROOT)) if pw else None, crop_cfg=load_crop_cfg(str(c_onnx)),
+                                 config={k: cfg[k] for k in ("seg", "cej", "wisdom", "caries", "perio")}, wis_iou=a.wis_iou, car_iou=a.car_iou))
     json.dump(rep, open(out / "report.json", "w"), ensure_ascii=False, indent=1)
     write_md(rep, out / "report.md", a)
     print((out / "report.md").read_text())

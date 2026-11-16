@@ -18,11 +18,13 @@ class DocIn(BaseModel):
     teeth: list[dict]
     strokes: list[dict] = []  # nét vẽ chú thích (bút chì / tẩy)
     caries: list[dict] | None = None  # vùng sâu răng đã sửa (None = không đổi)
+    regions: list[dict] | None = None  # vùng thân răng / vùng xương (CEJ, nha chu) đã sửa (None = không đổi)
 
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "model": os.path.exists(pipeline.MODEL_PATH), "caries_model": os.path.exists(pipeline.CARIES_MODEL_PATH), "steps": pipeline.STEPS, "config": pipeline.CONFIG_SCHEMA}
+    return {"ok": True, "model": os.path.exists(pipeline.MODEL_PATH), "caries_model": os.path.exists(pipeline.CARIES_MODEL_PATH),
+            "perio_model": os.path.exists(pipeline.PERIO_MODEL_PATH), "steps": pipeline.STEPS, "config": pipeline.CONFIG_SCHEMA}
 
 
 @app.post("/api/auth/login")
@@ -85,9 +87,19 @@ def save_edits(inf_id: int, body: DocIn, user=Depends(auth.current_user)):
     res["teeth"], res["strokes"] = body.teeth, body.strokes
     if body.caries is not None:
         res.setdefault("findings", {})["caries"] = body.caries
-    # polygon răng 7/8 có thể đã sửa -> tính lại phân tích răng khôn cho khớp (cùng config lúc chạy)
-    wcfg = pipeline.resolve_config(res.get("config"))["wisdom"]
-    if wcfg["enabled"]:
-        res.setdefault("findings", {})["wisdom"] = pipeline.analyze_wisdom(body.teeth, res["width"], res["height"], wcfg)
-    db.q("UPDATE inferences SET result=?, teeth=? WHERE id=?", (json.dumps(res), len(body.teeth), inf_id))
-    return {"ok": True, "findings": res["findings"]}
+    if body.regions is not None:
+        res["regions"] = body.regions
+    # polygon răng / vùng CEJ-xương có thể đã sửa -> tính lại CEJ, tiêu xương, răng khôn (cùng config lúc chạy)
+    cfg = pipeline.resolve_config(res.get("config"))
+    f = res.setdefault("findings", {})
+    if "cej" in f or "perio" in f:
+        cej, perio = pipeline.perio_findings(body.teeth, res.get("regions", []), cfg["perio"])
+        if "cej" in f:
+            f["cej"] = cej
+        if "perio" in f:
+            f["perio"] = perio
+    if cfg["wisdom"]["enabled"]:
+        f["wisdom"] = pipeline.analyze_wisdom(body.teeth, res["width"], res["height"], cfg["wisdom"], f.get("cej"))
+    db.q("UPDATE inferences SET result=?, teeth=?, cej=?, perio=? WHERE id=?",
+         (json.dumps(res), len(body.teeth), len(f.get("cej", [])), sum(1 for m in f.get("perio", []) if m["stage"] >= 2), inf_id))
+    return {"ok": True, "findings": res["findings"], "regions": res.get("regions", [])}

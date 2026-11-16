@@ -18,10 +18,10 @@ export const STATUS = {
 const PORTS = {
   input: [[], ['Image']],
   seg: [['Image In'], ['Teeth']],
-  wisdom: [['Teeth'], ['Wisdom']],
+  wisdom: [['Teeth', 'CEJ'], ['Wisdom']],
   caries: [['Image In', 'Teeth'], ['Caries']],
-  perio: [['Image In', 'Teeth'], ['Bone line']],
-  cej: [['Image In', 'Teeth'], ['CEJ']],
+  cej: [['Image In', 'Teeth'], ['CEJ', 'Regions']],
+  perio: [['Teeth', 'Regions'], ['Bone loss']],
 }
 
 function StepNode({ data }) {

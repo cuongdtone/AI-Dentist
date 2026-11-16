@@ -7,16 +7,16 @@ import ImageViewer from '../components/ImageViewer'
 import PipelineGraph from '../components/PipelineGraph'
 import ResultPanel from '../components/ResultPanel'
 
-const EMPTY = { teeth: [], strokes: [], caries: null } // caries: null = bước sâu răng chưa xong
+const EMPTY = { teeth: [], strokes: [], caries: null, regions: null } // null = bước tương ứng chưa xong
 const MODES = [
-  { value: 'edit', label: <><Icon name="pencil" size={14} /> Chỉnh sửa</>, desc: 'Sửa polygon răng / vùng sâu, vẽ chú thích' },
+  { value: 'edit', label: <><Icon name="pencil" size={14} /> Chỉnh sửa</>, desc: 'Sửa polygon răng / vùng sâu / vùng CEJ-xương, vẽ chú thích' },
   { value: 'view', label: <><Icon name="eye" size={14} /> Chỉ xem</>, desc: 'Xem kết quả, không thay đổi' },
 ]
 // Độ rộng panel trái / phải (% màn hình), kéo thanh chia để đổi; nhớ theo trình duyệt
 const DEFAULT_SIZES = { left: 16, right: 30 }
 const loadSizes = () => { try { return JSON.parse(localStorage.getItem('diagSizes')) ?? DEFAULT_SIZES } catch { return DEFAULT_SIZES } }
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
-const OVERLAY_STEPS = ['input', 'seg', 'wisdom', 'caries'] // bước có lớp vẽ trên ảnh (Hide/Show)
+const OVERLAY_STEPS = ['input', 'seg', 'cej', 'wisdom', 'caries', 'perio'] // bước có lớp vẽ trên ảnh (Hide/Show)
 // Cấu hình bước {key: {enabled, ...params}}: nhớ theo trình duyệt, ghép với mặc định từ schema
 const loadCfg = () => { try { return JSON.parse(localStorage.getItem('stepCfg')) ?? {} } catch { return {} } }
 
@@ -25,7 +25,7 @@ export default function Diagnosis({ active }) {
   const [stepDefs, setStepDefs] = useState([])
   const [schema, setSchema] = useState({})
   const [cfg, setCfg] = useState(loadCfg)
-  const [layers, setLayers] = useState({ input: true, seg: true, wisdom: true, caries: true }) // Hide/Show lớp vẽ
+  const [layers, setLayers] = useState({ input: true, seg: true, cej: true, wisdom: true, caries: true, perio: true }) // Hide/Show lớp vẽ
   const [cfgOpen, setCfgOpen] = useState(null) // key bước đang mở hộp cấu hình
   const [file, setFile] = useState(null)
   const [src, setSrc] = useState(null)
@@ -123,10 +123,13 @@ export default function Diagnosis({ active }) {
         setJob(j)
         const cs = j.steps.find((x) => x.key === 'caries')
         const jc = cs?.status === 'done' && Array.isArray(j.result.findings?.caries) ? j.result.findings.caries : null
+        const rs = j.steps.find((x) => x.key === 'cej')
+        const jr = rs?.status === 'done' && Array.isArray(j.result.regions) ? j.result.regions : null
         setDoc((d) => ({ // vẽ lại ngay khi phân đoạn / sâu răng xong; sau đó giữ bản đang sửa
           ...d,
           teeth: d.teeth.length ? d.teeth : j.result.teeth,
           caries: d.caries ?? jc,
+          regions: d.regions ?? jr,
         }))
         if (j.status !== 'running') clearInterval(timer.current)
       } catch (e) {
@@ -167,7 +170,8 @@ export default function Diagnosis({ active }) {
   const save = async () => {
     try {
       const r = await api(`/inferences/${job.inference_id}`, { method: 'PUT', json: doc })
-      if (r.findings) setJob((j) => ({ ...j, result: { ...j.result, findings: r.findings } })) // răng khôn tính lại theo polygon đã sửa
+      // CEJ, tiêu xương, răng khôn được tính lại theo polygon răng / vùng đã sửa
+      if (r.findings) setJob((j) => ({ ...j, result: { ...j.result, findings: r.findings, regions: r.regions ?? j.result.regions } }))
       setDirty(false)
       setMsg('Đã lưu chỉnh sửa')
     } catch (e) {
@@ -210,6 +214,8 @@ export default function Diagnosis({ active }) {
           <label><input type="checkbox" checked={opts.polygon} onChange={opt('polygon')} /> Polygon</label>
           <label><input type="checkbox" checked={opts.fdi} onChange={opt('fdi')} /> FDI</label>
           <label title="Trục răng khôn, trục răng 7, mặt nhai, CEJ"><input type="checkbox" checked={layers.wisdom} onChange={() => onStepAction('wisdom', 'visible')} /> Răng khôn</label>
+          <label title="Vùng thân răng (mép = CEJ), vùng xương, điểm CEJ từng răng"><input type="checkbox" checked={layers.cej} onChange={() => onStepAction('cej', 'visible')} /> CEJ</label>
+          <label title="Đoạn CEJ → đỉnh xương, % tiêu xương"><input type="checkbox" checked={layers.perio} onChange={() => onStepAction('perio', 'visible')} /> Nha chu</label>
           <label title="Vùng sâu răng"><input type="checkbox" checked={layers.caries} onChange={() => onStepAction('caries', 'visible')} /> Sâu răng</label>
           <label>Opacity <input type="range" min="0" max="1" step="0.05" value={opts.opacity} onChange={opt('opacity')} /></label>
           <span className="spacer" />
@@ -217,9 +223,10 @@ export default function Diagnosis({ active }) {
           <button className="btn" onClick={save} disabled={mode !== 'edit' || !dirty || !job?.inference_id}>💾 Lưu</button>
         </div>
         <ImageViewer src={src} teeth={doc.teeth} strokes={doc.strokes} editable={editable}
-          opts={{ ...opts, image: layers.input, teeth: layers.seg, wisdom: layers.wisdom, caries: layers.caries }}
+          opts={{ ...opts, image: layers.input, teeth: layers.seg, wisdom: layers.wisdom, caries: layers.caries, cej: layers.cej, perio: layers.perio }}
           hover={hover} onHover={setHover} onChange={change} onEditStart={snapshot} onUndo={undo} onRedo={redo}
-          wisdom={job?.result.findings?.wisdom ?? []} caries={doc.caries ?? []} />
+          wisdom={job?.result.findings?.wisdom ?? []} caries={doc.caries ?? []}
+          regions={doc.regions ?? []} cej={job?.result.findings?.cej ?? []} perio={job?.result.findings?.perio ?? []} />
       </section>
       <div className="splitter" onPointerDown={startResize('right')} onDoubleClick={() => setSizes(DEFAULT_SIZES)} title="Kéo để đổi kích thước · nhấp đúp: mặc định" />
 

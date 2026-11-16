@@ -100,8 +100,10 @@ def depth_class(r, p):
     return "B" if r <= p["cej_frac"] else "C"
 
 
-def analyze_tooth(m3_mask, m2_mask, fdi, p=DEFAULT_PARAMS):
-    """Trả về dict đặc trưng + kết luận cho 1 răng khôn. m2_mask có thể None."""
+def analyze_tooth(m3_mask, m2_mask, fdi, p=DEFAULT_PARAMS, m2_cej=None):
+    """Trả về dict đặc trưng + kết luận cho 1 răng khôn. m2_mask có thể None.
+    m2_cej: các điểm CEJ THẬT của răng 7 (toạ độ ảnh, từ perio_geom) -> thay CEJ ước lượng cej_frac
+    làm ranh giới độ sâu B/C."""
     out = {"fdi": fdi, "flags": []}
     pts3 = mask_points(m3_mask)
     if len(pts3) < 20:
@@ -123,8 +125,12 @@ def analyze_tooth(m3_mask, m2_mask, fdi, p=DEFAULT_PARAMS):
         L = max(occ - apex, 1.0)
         top3 = np.percentile(pts3 @ ref, 98)
         r = float((occ - top3) / L)
+        cej = float(occ - p["cej_frac"] * L)
+        if m2_cej:  # CEJ đo được: trung bình chiếu các điểm CEJ lên trục răng 7
+            cej = float(np.mean(np.asarray(m2_cej, float) @ ref))
+            out["cej_source"] = "measured"
         out.update(m2_center=c2.tolist(), m2_axis=ref.tolist(), m2_len=round(float(L), 1),
-                   occ_level=float(occ), cej_level=float(occ - p["cej_frac"] * L), depth_ratio=round(r, 3))
+                   occ_level=float(occ), cej_level=cej, depth_ratio=round(r, 3))
     else:
         out["flags"].append("thieu_m2")
         a2, r = 0.0, None  # tham chiếu = trục đứng; không tính được độ sâu
@@ -132,14 +138,16 @@ def analyze_tooth(m3_mask, m2_mask, fdi, p=DEFAULT_PARAMS):
     ang = (a3 - a2 + 180) % 360 - 180
     out["winter_angle"] = round(ang, 1)
     out["winter"] = winter_class(ang)
-    out["depth"] = depth_class(r, p)
+    out["depth"] = depth_class(r, p if "cej_level" not in out else {**p, "cej_frac": (out["occ_level"] - out["cej_level"]) / out["m2_len"]})
     out["impacted"] = bool((r is not None and r > p["impact_depth"]) or abs(ang) > p["angle_thr"])
     return out
 
 
-def analyze_teeth(masks, p=DEFAULT_PARAMS, which=WISDOM):
-    """masks: dict {fdi(int): bool mask HxW}. Trả về list kết quả cho các răng khôn có mặt."""
-    return [analyze_tooth(masks[f], masks.get(f - 1), f, p) for f in which if f in masks]
+def analyze_teeth(masks, p=DEFAULT_PARAMS, which=WISDOM, cej=None):
+    """masks: dict {fdi(int): bool mask HxW}; cej: {fdi răng 7 (int): [điểm CEJ]} (tuỳ chọn).
+    Trả về list kết quả cho các răng khôn có mặt."""
+    cej = cej or {}
+    return [analyze_tooth(masks[f], masks.get(f - 1), f, p, cej.get(f - 1)) for f in which if f in masks]
 
 
 def describe(r):

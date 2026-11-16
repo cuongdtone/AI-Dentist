@@ -7,8 +7,8 @@ const PERIODS = [['day', 'Ngày', '30 ngày qua'], ['week', 'Tuần', '12 tuần
 const FINDINGS = [
   ['wisdom', 'Răng khôn', '#3987e5'],
   ['caries', 'Sâu răng', '#d95926'],
-  ['perio', 'Bệnh nha chu', '#199e70'],
-  ['cej', 'Bất thường CEJ', '#c98500'],
+  ['perio', 'Răng tiêu xương ≥ 15%', '#199e70'],
+  ['cej', 'Răng xác định CEJ', '#c98500'],
 ]
 const CARDS = [['images', 'Ảnh đã phân tích'], ['teeth', 'Răng phát hiện'], ...FINDINGS]
 

@@ -2,6 +2,7 @@
 Dùng:
   python export_onnx.py --preset tooth  [--weights ...]   # -> ../backend/models/tooth_seg.onnx  (imgsz 1024)
   python export_onnx.py --preset caries [--weights ...]   # -> ../backend/models/caries_seg.onnx (imgsz 384)
+  python export_onnx.py --preset perio  [--weights ...]   # -> ../backend/models/perio_seg.onnx  (imgsz 1024, CEJ + mức xương)
 Model được mount vào container -> export xong chỉ cần: docker compose restart backend
 caries: chép thêm crop.json của dataset đã train (cách cắt răng) thành caries_seg.json cạnh file ONNX.
 """
@@ -16,6 +17,9 @@ PRESETS = {
     # imgsz phải bằng imgsz lúc train (research/caries-seg/train.py), crop từng răng
     "caries": dict(weights=RESEARCH / "caries-seg/runs/segment/runs/caries_align_384/weights/best.pt",
                    out="../backend/models/caries_seg.onnx", imgsz=384),
+    # 3 vùng theo cả cung hàm: crown_upper, crown_lower, bone_window (research/perio-seg)
+    "perio": dict(weights=RESEARCH / "perio-seg/runs/segment/runs/perio_1024/weights/best.pt",
+                  out="../backend/models/perio_seg.onnx", imgsz=1024),
 }
 
 

@@ -5,20 +5,22 @@ import os, threading, time, uuid
 from collections import OrderedDict
 import cv2
 import numpy as np
-from . import caries, db, wisdom_geom
+from . import caries, db, perio_geom, wisdom_geom
 from .model import ToothSegmenter
 
 MODEL_PATH = os.getenv("MODEL_PATH", "./models/tooth_seg.onnx")
 CARIES_MODEL_PATH = os.getenv("CARIES_MODEL_PATH", "./models/caries_seg.onnx")
+PERIO_MODEL_PATH = os.getenv("PERIO_MODEL_PATH", "./models/perio_seg.onnx")  # vùng thân răng + vùng giữa đỉnh xương
 # Ngưỡng luật ngầm/lệch, chỉnh trên DENTEX bằng research/wisdom-analysis/calibrate.py
 WISDOM_PARAMS = wisdom_geom.load_params(os.path.join(os.path.dirname(__file__), "wisdom_params.json"))
 
+# Thứ tự chạy: CEJ trước răng khôn (răng khôn dùng CEJ thật của răng 7 nếu có)
 STEPS = [
     ("seg", "Phân đoạn răng"),
+    ("cej", "Phân tích mức CEJ"),
     ("wisdom", "Phân tích răng khôn"),
     ("caries", "Phân tích sâu răng"),
-    ("perio", "Phân tích đường nha chu"),
-    ("cej", "Phân tích mức CEJ"),
+    ("perio", "Phân tích tiêu xương nha chu"),
 ]
 
 _models = {}
@@ -47,6 +49,12 @@ def get_caries_model():
     if not os.path.exists(CARIES_MODEL_PATH):
         raise Skip("Chưa có model sâu răng")
     return _load(CARIES_MODEL_PATH), caries.load_crop_cfg(CARIES_MODEL_PATH)
+
+
+def get_perio_model() -> ToothSegmenter:
+    if not os.path.exists(PERIO_MODEL_PATH):
+        raise Skip("Chưa có model CEJ / xương")
+    return _load(PERIO_MODEL_PATH)
 
 
 # ---------------- Cấu hình từng bước (UI tự sinh form từ schema này) ----------------
@@ -106,8 +114,28 @@ CONFIG_SCHEMA = {
         _n("eps", "Độ rút gọn polygon (px)", 0.5, 5.0, 0.5, 1.0,
            "Sai số tối đa (pixel, trên ảnh crop đã đưa về kích thước model) khi rút gọn viền vùng sâu thành polygon."),
     ],
+    "cej": [
+        _n("conf", "Ngưỡng tin cậy (conf)", 0.05, 0.95, 0.05, 0.25,
+           "Model tìm 3 vùng theo cả cung hàm: thân răng hàm trên, thân răng hàm dưới (mép phía chân = đường CEJ) và "
+           "vùng giữa đỉnh xương hai hàm (mép = đường đỉnh xương). Vùng có độ tin cậy dưới ngưỡng bị bỏ."),
+        _n("mask_thr", "Ngưỡng mask", 0.1, 0.9, 0.05, 0.5,
+           "Xác suất tối thiểu để một điểm ảnh thuộc vùng. Tăng → vùng co lại (đường CEJ dịch về phía mặt nhai, "
+           "đường đỉnh xương dịch về phía thân răng); giảm → vùng nở ra."),
+        _n("eps", "Độ rút gọn polygon (px)", 0.5, 8.0, 0.5, 2.0,
+           "Sai số tối đa (pixel, trên ảnh 1024) khi rút gọn viền vùng thành polygon. Lớn → ít đỉnh, dễ sửa tay; nhỏ → sát viền hơn."),
+    ],
+    "perio": [
+        _n("side_frac", "Vị trí đo mặt gần / xa", 0.2, 0.9, 0.05, perio_geom.DEFAULT_PARAMS["side_frac"],
+           "Mỗi răng được đo trên 2 đường song song trục răng ở mặt gần và mặt xa, cách trục = giá trị × nửa bề rộng răng. "
+           "Lớn → sát mặt tiếp giáp (đúng vị trí đo lâm sàng) nhưng dễ lệch ra ngoài chân răng thon."),
+        _n("phys_frac", "Khoảng sinh lý CEJ – đỉnh xương", 0, 0.3, 0.01, perio_geom.DEFAULT_PARAMS["phys_frac"],
+           "Đỉnh xương bình thường nằm dưới CEJ ~1.5–2 mm. Tính theo tỉ lệ chiều dài CEJ → chóp (≈0.1 với chân răng ~15 mm) "
+           "và được trừ trước khi tính % tiêu xương."),
+        _n("angular_thr", "Ngưỡng tiêu xương dạng góc", 0.05, 0.5, 0.01, perio_geom.DEFAULT_PARAMS["angular_thr"],
+           "Chênh lệch % tiêu xương giữa mặt gần và mặt xa vượt ngưỡng (và tiêu ≥ 15%) → gắn cờ tiêu xương dạng góc (dọc)."),
+    ],
 }
-REQUIRES = {"wisdom": "seg", "caries": "seg", "perio": "seg", "cej": "seg"}  # bước cần kết quả của bước khác
+REQUIRES = {"wisdom": "seg", "caries": "seg", "cej": "seg", "perio": "cej"}  # bước cần kết quả của bước khác
 WISDOM_JAWS = {"both": (18, 28, 38, 48), "lower": (38, 48), "upper": (18, 28)}
 
 
@@ -136,8 +164,9 @@ def step_seg(image, res, p):
     res["teeth"] = get_model()(image, conf=p["conf"], iou=p["iou"], mask_thr=p["mask_thr"], ios_thr=p["ios_thr"], eps=p["eps"])
 
 
-def analyze_wisdom(teeth, width, height, p=None):
+def analyze_wisdom(teeth, width, height, p=None, cej=None):
     """Phân tích hình học răng khôn từ polygon răng 7 & 8: Winter, độ sâu A/B/C, ngầm/lệch.
+    cej: findings["cej"] (nếu có) -> dùng CEJ thật của răng 7 thay CEJ ước lượng.
     Trả về list (mỗi phần tử 1 răng khôn), thêm "text" mô tả tiếng Việt và "tooth_id" để UI hover."""
     masks, ids, best = {}, {}, {}
     for t in teeth:
@@ -150,7 +179,11 @@ def analyze_wisdom(teeth, width, height, p=None):
             masks[f], ids[f] = m.astype(bool), t.get("id")
     out = []
     params = {**WISDOM_PARAMS, **{k: v for k, v in (p or {}).items() if k in WISDOM_PARAMS}}
-    for r in wisdom_geom.analyze_teeth(masks, params, WISDOM_JAWS[(p or {}).get("jaws", "both")]):
+    cej_pts = {}
+    for c in cej or []:
+        if int(c["fdi"]) % 10 == 7 and c.get("tooth_id") == ids.get(int(c["fdi"])):
+            cej_pts[int(c["fdi"])] = [c[s] for s in ("mesial", "distal") if c.get(s)]
+    for r in wisdom_geom.analyze_teeth(masks, params, WISDOM_JAWS[(p or {}).get("jaws", "both")], cej_pts):
         r["fdi"] = str(r["fdi"])
         r["tooth_id"] = ids.get(int(r["fdi"]))
         r["text"] = wisdom_geom.describe({**r, "fdi": int(r["fdi"])})
@@ -159,7 +192,39 @@ def analyze_wisdom(teeth, width, height, p=None):
 
 
 def step_wisdom(image, res, p):
-    res["findings"]["wisdom"] = analyze_wisdom(res["teeth"], res["width"], res["height"], p)
+    res["findings"]["wisdom"] = analyze_wisdom(res["teeth"], res["width"], res["height"], p, res["findings"].get("cej"))
+
+
+def detect_regions(image, p):
+    """Model perio-seg -> list {id, kind, conf, polygon} (mỗi loại giữ vùng conf cao nhất)."""
+    # ios_thr > 1: tắt loại mask trùng — vùng thân răng nằm gọn trong vùng xương là ĐÚNG, không phải trùng
+    found = get_perio_model()(image, conf=p["conf"], iou=0.7, mask_thr=p["mask_thr"], ios_thr=1.01, eps=p["eps"])
+    best = {}
+    for f in found:
+        if f["fdi"] in perio_geom.KINDS and f["conf"] > best.get(f["fdi"], {}).get("conf", -1):
+            best[f["fdi"]] = {"kind": f["fdi"], "conf": f["conf"], "polygon": f["polygon"]}
+    regions = [best[k] for k in perio_geom.KINDS if k in best]
+    for i, r in enumerate(regions):
+        r["id"] = i
+    return regions
+
+
+def perio_findings(teeth, regions, p):
+    """-> (cej, perio): cej = điểm CEJ mặt gần/xa từng răng; perio = đo đủ (đỉnh xương, % tiêu xương, giai đoạn)."""
+    meas = perio_geom.measure(teeth, regions, p)
+    cej = [{"tooth_id": m["tooth_id"], "fdi": m["fdi"], **{s: (m[s] or {}).get("cej") for s in ("mesial", "distal")}} for m in meas]
+    for m in meas:
+        m["text"] = perio_geom.describe(m)
+    return cej, meas
+
+
+def step_cej(image, res, p):
+    res["regions"] = detect_regions(image, p)
+    res["findings"]["cej"], _ = perio_findings(res["teeth"], res["regions"], res["config"]["perio"])
+
+
+def step_perio(image, res, p):
+    _, res["findings"]["perio"] = perio_findings(res["teeth"], res.get("regions", []), p)
 
 
 def step_caries(image, res, p):
@@ -167,12 +232,14 @@ def step_caries(image, res, p):
     res["findings"]["caries"] = caries.analyze_caries(model, crop_cfg, image, res["teeth"], p)
 
 
-RUNNERS = {"seg": step_seg, "wisdom": step_wisdom, "caries": step_caries}  # bước chưa có -> "skipped"
+RUNNERS = {"seg": step_seg, "cej": step_cej, "wisdom": step_wisdom, "caries": step_caries, "perio": step_perio}  # bước chưa có -> "skipped"
 
 
 def counts(res):
     f = res["findings"]
-    return {"teeth": len(res["teeth"]), **{k: len(f.get(k, [])) for k in ("wisdom", "caries", "perio", "cej")}}
+    # perio = số răng tiêu xương >= giai đoạn II; cej = số răng xác định được CEJ
+    return {"teeth": len(res["teeth"]), **{k: len(f.get(k, [])) for k in ("wisdom", "caries", "cej")},
+            "perio": sum(1 for m in f.get("perio", []) if m["stage"] >= 2)}
 
 
 class Job:
@@ -185,7 +252,7 @@ class Job:
         self.config = resolve_config(config)
         self.steps = [{"key": k, "name": n, "status": "pending", "ms": None, "error": None, "note": None} for k, n in STEPS]
         h, w = image.shape[:2]
-        self.result = {"width": w, "height": h, "teeth": [], "findings": {}, "config": self.config}
+        self.result = {"width": w, "height": h, "teeth": [], "regions": [], "findings": {}, "config": self.config}
 
     def run(self):
         for st in self.steps:
