@@ -1,0 +1,524 @@
+{
+ "test": {
+  "images": 134,
+  "wisdom": {
+   "lower_teeth": {
+    "n": 189,
+    "tp": 65,
+    "fp": 45,
+    "fn": 17,
+    "tn": 62,
+    "precision": 0.5909,
+    "recall": 0.7927,
+    "f1": 0.6771,
+    "specificity": 0.5794,
+    "accuracy": 0.672
+   },
+   "by_fdi": {
+    "38": {
+     "n": 97,
+     "tp": 37,
+     "fp": 23,
+     "fn": 10,
+     "tn": 27,
+     "precision": 0.6167,
+     "recall": 0.7872,
+     "f1": 0.6916,
+     "specificity": 0.54,
+     "accuracy": 0.6598
+    },
+    "48": {
+     "n": 92,
+     "tp": 28,
+     "fp": 22,
+     "fn": 7,
+     "tn": 35,
+     "precision": 0.56,
+     "recall": 0.8,
+     "f1": 0.6588,
+     "specificity": 0.614,
+     "accuracy": 0.6848
+    }
+   },
+   "gt_boxes": 84,
+   "gt_boxes_matched_tooth": 82,
+   "gt_boxes_detected_impacted": 65
+  },
+  "caries_labeled_images": {
+   "images": 93,
+   "gt_lesions": 295,
+   "pred_lesions": 486,
+   "lesion": {
+    "precision": 0.4321,
+    "recall": 0.7119,
+    "f1": 0.5378,
+    "tp_gt": 210,
+    "tp_pred": 210
+   },
+   "gt_lesions_no_tooth": 4,
+   "tooth": {
+    "n": 2591,
+    "tp": 213,
+    "fp": 242,
+    "fn": 51,
+    "tn": 2085,
+    "precision": 0.4681,
+    "recall": 0.8068,
+    "f1": 0.5925,
+    "specificity": 0.896,
+    "accuracy": 0.8869
+   },
+   "image": {
+    "n": 93,
+    "tp": 93,
+    "fp": 0,
+    "fn": 0,
+    "tn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "specificity": 0.0,
+    "accuracy": 1.0
+   }
+  },
+  "caries_all_images": {
+   "images": 134,
+   "gt_lesions": 295,
+   "pred_lesions": 557,
+   "lesion": {
+    "precision": 0.377,
+    "recall": 0.7119,
+    "f1": 0.493,
+    "tp_gt": 210,
+    "tp_pred": 210
+   },
+   "gt_lesions_no_tooth": 4,
+   "tooth": {
+    "n": 3821,
+    "tp": 213,
+    "fp": 311,
+    "fn": 51,
+    "tn": 3246,
+    "precision": 0.4065,
+    "recall": 0.8068,
+    "f1": 0.5406,
+    "specificity": 0.9126,
+    "accuracy": 0.9053
+   },
+   "image": {
+    "n": 134,
+    "tp": 93,
+    "fp": 30,
+    "fn": 0,
+    "tn": 11,
+    "precision": 0.7561,
+    "recall": 1.0,
+    "f1": 0.8611,
+    "specificity": 0.2683,
+    "accuracy": 0.7761
+   }
+  }
+ },
+ "val": {
+  "images": 134,
+  "wisdom": {
+   "lower_teeth": {
+    "n": 180,
+    "tp": 63,
+    "fp": 45,
+    "fn": 18,
+    "tn": 54,
+    "precision": 0.5833,
+    "recall": 0.7778,
+    "f1": 0.6667,
+    "specificity": 0.5455,
+    "accuracy": 0.65
+   },
+   "by_fdi": {
+    "38": {
+     "n": 91,
+     "tp": 35,
+     "fp": 22,
+     "fn": 8,
+     "tn": 26,
+     "precision": 0.614,
+     "recall": 0.814,
+     "f1": 0.7,
+     "specificity": 0.5417,
+     "accuracy": 0.6703
+    },
+    "48": {
+     "n": 89,
+     "tp": 28,
+     "fp": 23,
+     "fn": 10,
+     "tn": 28,
+     "precision": 0.549,
+     "recall": 0.7368,
+     "f1": 0.6292,
+     "specificity": 0.549,
+     "accuracy": 0.6292
+    }
+   },
+   "gt_boxes": 83,
+   "gt_boxes_matched_tooth": 81,
+   "gt_boxes_detected_impacted": 63
+  },
+  "caries_labeled_images": {
+   "images": 80,
+   "gt_lesions": 282,
+   "pred_lesions": 429,
+   "lesion": {
+    "precision": 0.5128,
+    "recall": 0.7801,
+    "f1": 0.6188,
+    "tp_gt": 220,
+    "tp_pred": 220
+   },
+   "gt_lesions_no_tooth": 13,
+   "tooth": {
+    "n": 2233,
+    "tp": 220,
+    "fp": 189,
+    "fn": 33,
+    "tn": 1791,
+    "precision": 0.5379,
+    "recall": 0.8696,
+    "f1": 0.6647,
+    "specificity": 0.9045,
+    "accuracy": 0.9006
+   },
+   "image": {
+    "n": 80,
+    "tp": 80,
+    "fp": 0,
+    "fn": 0,
+    "tn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "specificity": 0.0,
+    "accuracy": 1.0
+   }
+  },
+  "caries_all_images": {
+   "images": 134,
+   "gt_lesions": 282,
+   "pred_lesions": 538,
+   "lesion": {
+    "precision": 0.4089,
+    "recall": 0.7801,
+    "f1": 0.5366,
+    "tp_gt": 220,
+    "tp_pred": 220
+   },
+   "gt_lesions_no_tooth": 13,
+   "tooth": {
+    "n": 3801,
+    "tp": 220,
+    "fp": 295,
+    "fn": 33,
+    "tn": 3253,
+    "precision": 0.4272,
+    "recall": 0.8696,
+    "f1": 0.5729,
+    "specificity": 0.9169,
+    "accuracy": 0.9137
+   },
+   "image": {
+    "n": 134,
+    "tp": 80,
+    "fp": 45,
+    "fn": 0,
+    "tn": 9,
+    "precision": 0.64,
+    "recall": 1.0,
+    "f1": 0.7805,
+    "specificity": 0.1667,
+    "accuracy": 0.6642
+   }
+  }
+ },
+ "train": {
+  "images": 623,
+  "wisdom": {
+   "lower_teeth": {
+    "n": 849,
+    "tp": 286,
+    "fp": 226,
+    "fn": 80,
+    "tn": 257,
+    "precision": 0.5586,
+    "recall": 0.7814,
+    "f1": 0.6515,
+    "specificity": 0.5321,
+    "accuracy": 0.6396
+   },
+   "by_fdi": {
+    "38": {
+     "n": 419,
+     "tp": 138,
+     "fp": 119,
+     "fn": 44,
+     "tn": 118,
+     "precision": 0.537,
+     "recall": 0.7582,
+     "f1": 0.6287,
+     "specificity": 0.4979,
+     "accuracy": 0.611
+    },
+    "48": {
+     "n": 430,
+     "tp": 148,
+     "fp": 107,
+     "fn": 36,
+     "tn": 139,
+     "precision": 0.5804,
+     "recall": 0.8043,
+     "f1": 0.6743,
+     "specificity": 0.565,
+     "accuracy": 0.6674
+    }
+   },
+   "gt_boxes": 383,
+   "gt_boxes_matched_tooth": 366,
+   "gt_boxes_detected_impacted": 286
+  },
+  "caries_labeled_images": {
+   "images": 410,
+   "gt_lesions": 1327,
+   "pred_lesions": 2083,
+   "lesion": {
+    "precision": 0.529,
+    "recall": 0.8304,
+    "f1": 0.6463,
+    "tp_gt": 1102,
+    "tp_pred": 1102
+   },
+   "gt_lesions_no_tooth": 47,
+   "tooth": {
+    "n": 11401,
+    "tp": 1077,
+    "fp": 874,
+    "fn": 117,
+    "tn": 9333,
+    "precision": 0.552,
+    "recall": 0.902,
+    "f1": 0.6849,
+    "specificity": 0.9144,
+    "accuracy": 0.9131
+   },
+   "image": {
+    "n": 410,
+    "tp": 406,
+    "fp": 0,
+    "fn": 4,
+    "tn": 0,
+    "precision": 1.0,
+    "recall": 0.9902,
+    "f1": 0.9951,
+    "specificity": 0.0,
+    "accuracy": 0.9902
+   }
+  },
+  "caries_all_images": {
+   "images": 623,
+   "gt_lesions": 1327,
+   "pred_lesions": 2518,
+   "lesion": {
+    "precision": 0.4376,
+    "recall": 0.8304,
+    "f1": 0.5732,
+    "tp_gt": 1102,
+    "tp_pred": 1102
+   },
+   "gt_lesions_no_tooth": 47,
+   "tooth": {
+    "n": 17589,
+    "tp": 1077,
+    "fp": 1297,
+    "fn": 117,
+    "tn": 15098,
+    "precision": 0.4537,
+    "recall": 0.902,
+    "f1": 0.6037,
+    "specificity": 0.9209,
+    "accuracy": 0.9196
+   },
+   "image": {
+    "n": 623,
+    "tp": 406,
+    "fp": 172,
+    "fn": 4,
+    "tn": 41,
+    "precision": 0.7024,
+    "recall": 0.9902,
+    "f1": 0.8219,
+    "specificity": 0.1925,
+    "accuracy": 0.7175
+   }
+  }
+ },
+ "all": {
+  "images": 891,
+  "wisdom": {
+   "lower_teeth": {
+    "n": 1218,
+    "tp": 414,
+    "fp": 316,
+    "fn": 115,
+    "tn": 373,
+    "precision": 0.5671,
+    "recall": 0.7826,
+    "f1": 0.6577,
+    "specificity": 0.5414,
+    "accuracy": 0.6461
+   },
+   "by_fdi": {
+    "38": {
+     "n": 607,
+     "tp": 210,
+     "fp": 164,
+     "fn": 62,
+     "tn": 171,
+     "precision": 0.5615,
+     "recall": 0.7721,
+     "f1": 0.6502,
+     "specificity": 0.5104,
+     "accuracy": 0.6277
+    },
+    "48": {
+     "n": 611,
+     "tp": 204,
+     "fp": 152,
+     "fn": 53,
+     "tn": 202,
+     "precision": 0.573,
+     "recall": 0.7938,
+     "f1": 0.6656,
+     "specificity": 0.5706,
+     "accuracy": 0.6645
+    }
+   },
+   "gt_boxes": 550,
+   "gt_boxes_matched_tooth": 529,
+   "gt_boxes_detected_impacted": 414
+  },
+  "caries_labeled_images": {
+   "images": 583,
+   "gt_lesions": 1904,
+   "pred_lesions": 2998,
+   "lesion": {
+    "precision": 0.511,
+    "recall": 0.8046,
+    "f1": 0.6251,
+    "tp_gt": 1532,
+    "tp_pred": 1532
+   },
+   "gt_lesions_no_tooth": 64,
+   "tooth": {
+    "n": 16225,
+    "tp": 1510,
+    "fp": 1305,
+    "fn": 201,
+    "tn": 13209,
+    "precision": 0.5364,
+    "recall": 0.8825,
+    "f1": 0.6673,
+    "specificity": 0.9101,
+    "accuracy": 0.9072
+   },
+   "image": {
+    "n": 583,
+    "tp": 579,
+    "fp": 0,
+    "fn": 4,
+    "tn": 0,
+    "precision": 1.0,
+    "recall": 0.9931,
+    "f1": 0.9966,
+    "specificity": 0.0,
+    "accuracy": 0.9931
+   }
+  },
+  "caries_all_images": {
+   "images": 891,
+   "gt_lesions": 1904,
+   "pred_lesions": 3613,
+   "lesion": {
+    "precision": 0.424,
+    "recall": 0.8046,
+    "f1": 0.5554,
+    "tp_gt": 1532,
+    "tp_pred": 1532
+   },
+   "gt_lesions_no_tooth": 64,
+   "tooth": {
+    "n": 25211,
+    "tp": 1510,
+    "fp": 1903,
+    "fn": 201,
+    "tn": 21597,
+    "precision": 0.4424,
+    "recall": 0.8825,
+    "f1": 0.5894,
+    "specificity": 0.919,
+    "accuracy": 0.9165
+   },
+   "image": {
+    "n": 891,
+    "tp": 579,
+    "fp": 247,
+    "fn": 4,
+    "tn": 61,
+    "precision": 0.701,
+    "recall": 0.9931,
+    "f1": 0.8219,
+    "specificity": 0.1981,
+    "accuracy": 0.7183
+   }
+  }
+ },
+ "tag": "ft_finaldata_30__caries_align_384",
+ "date": "2026-11-16 10:53",
+ "n_images": 891,
+ "seconds": 1050.6063232421875,
+ "tooth_weights": "research/tooth-detect/runs/segment/runs/ft_finaldata_30/weights/best.pt",
+ "caries_weights": "research/caries-seg/runs/segment/runs/caries_align_384/weights/best.pt",
+ "crop_cfg": {
+  "align": true,
+  "margin": 0.1,
+  "mask_outside": false,
+  "mask_dilate": 6,
+  "label": "own"
+ },
+ "config": {
+  "seg": {
+   "enabled": true,
+   "conf": 0.25,
+   "iou": 0.5,
+   "mask_thr": 0.5,
+   "ios_thr": 0.6,
+   "eps": 1.0
+  },
+  "wisdom": {
+   "enabled": true,
+   "jaws": "both",
+   "angle_thr": 20.0,
+   "impact_depth": 0.19,
+   "depth_a": 0.05,
+   "cej_frac": 0.35,
+   "min_elong": 1.15
+  },
+  "caries": {
+   "enabled": true,
+   "conf": 0.25,
+   "mask_thr": 0.5,
+   "own_thr": 0.5,
+   "min_area": 50.0,
+   "eps": 1.0
+  }
+ },
+ "wis_iou": 0.3,
+ "car_iou": 0.2
+}
