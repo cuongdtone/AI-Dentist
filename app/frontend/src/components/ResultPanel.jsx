@@ -5,14 +5,16 @@ const UPPER = ['18', '17', '16', '15', '14', '13', '12', '11', '21', '22', '23',
 const LOWER = ['48', '47', '46', '45', '44', '43', '42', '41', '31', '32', '33', '34', '35', '36', '37', '38']
 const QUAD = { 1: 'hàm trên phải', 2: 'hàm trên trái', 3: 'hàm dưới trái', 4: 'hàm dưới phải' }
 const WISDOM = ['18', '28', '38', '48']
+const JAWS = { both: WISDOM, lower: ['38', '48'], upper: ['18', '28'] } // theo config "Hàm phân tích" của bước răng khôn
 const JOB_TEXT = { running: 'Đang chạy…', done: 'Hoàn thành', error: 'Lỗi', cancelled: 'Đã huỷ' }
 const STAGE_VI = { 1: 'I', 2: 'II', 3: 'III/IV' }
 
 const where = (fdi) => `${fdi} (${QUAD[fdi[0]]})`
 
-function wisdomText(found) {
-  if (!found.length) return 'Không thấy răng khôn trên phim.'
-  if (found.length === 4) return 'Đủ 4 răng khôn: 18, 28, 38, 48.'
+function wisdomText(found, jaws) {
+  const scope = jaws.length === 4 ? '' : jaws[0][0] === '3' ? ' hàm dưới' : ' hàm trên'
+  if (!found.length) return `Không thấy răng khôn${scope} trên phim.`
+  if (found.length === jaws.length) return `Đủ răng khôn${scope}: ${jaws.join(', ')}.`
   return `Răng khôn ${found.join(', ')}: ${found.map(where).join(', ')}.`
 }
 
@@ -109,7 +111,8 @@ function Chart({ row, byFdi, hover, onHover, cariesIds, impactedIds, stages }) {
 export default function ResultPanel({ job, busy, teeth, caries, hover, onHover, msg }) {
   const step = (k) => job?.steps.find((s) => s.key === k)
   const byFdi = Object.fromEntries(teeth.map((t) => [t.fdi, t]))
-  const wisdom = WISDOM.filter((f) => byFdi[f])
+  const jaws = JAWS[job?.result.config?.wisdom?.jaws] ?? JAWS.lower
+  const wisdom = jaws.filter((f) => byFdi[f])
   const wAnalysis = job?.result.findings.wisdom
   const wDone = step('wisdom')?.status === 'done' && Array.isArray(wAnalysis)
   const nImpacted = wDone ? wAnalysis.filter((w) => w.impacted).length : 0
@@ -163,12 +166,12 @@ export default function ResultPanel({ job, busy, teeth, caries, hover, onHover, 
           </div>
           <div className="res-item">
             <div className="res-title">
-              Răng khôn
+              Răng khôn{jaws === JAWS.lower ? ' hàm dưới' : jaws === JAWS.upper ? ' hàm trên' : ''}
               <span className={`badge ${nImpacted ? 'yes' : ''}`}>
                 {!wisdom.length ? 'Không' : wDone ? (nImpacted ? `Ngầm/lệch · ${nImpacted}/${wisdom.length}` : `Có · ${wisdom.length}`) : `Có · ${wisdom.length}`}
               </span>
             </div>
-            <p>{wisdomText(wisdom)}</p>
+            <p>{wisdomText(wisdom, jaws)}</p>
             {wDone && wAnalysis.length > 0 && <WisdomList items={wAnalysis} hover={hover} onHover={onHover} />}
             {wDone && wAnalysis.length > 0 && (
               <p className="muted small">Góc Winter: trục răng khôn so với trục răng 7 (dương = nghiêng về phía gần). Kết quả tự động, cần bác sĩ xác nhận.</p>

@@ -22,7 +22,7 @@ Nha chu: đo CEJ / đỉnh xương / % tiêu xương bằng app/backend/app/peri
 vùng bác sĩ (GT) và vùng model -> sai số chỉ do model vùng.
 Split train/val/test theo wisdom_tooth/data (test không dùng để train model răng lẫn model sâu răng) -> số liệu chính = test.
 """
-import argparse, colorsys, csv, glob, json, math, os, re, shutil, sys, time
+import argparse, colorsys, csv, glob, hashlib, json, math, os, re, shutil, sys, time
 from collections import Counter, defaultdict
 from pathlib import Path
 import cv2
@@ -599,7 +599,9 @@ def main():
         cfg["cej"]["enabled"] = cfg["perio"]["enabled"] = False
 
     out = Path(a.out) / tag
-    pcache = HERE / "cache/pred" / (f"{t_onnx.stem}__{c_onnx.stem}" + (f"__{p_onnx.stem}" if p_onnx else ""))
+    # khoá cache = model + config (đổi mặc định, vd răng khôn chỉ hàm dưới -> chạy lại)
+    chash = hashlib.md5(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:8]
+    pcache = HERE / "cache/pred" / (f"{t_onnx.stem}__{c_onnx.stem}" + (f"__{p_onnx.stem}" if p_onnx else "") + f"__cfg{chash}")
     pcache.mkdir(parents=True, exist_ok=True)
     want = a.splits.split(",")
     items = [it for it in collect(a.src) if it["split"] in want][: a.limit or None]

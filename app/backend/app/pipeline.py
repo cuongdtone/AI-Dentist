@@ -77,11 +77,13 @@ CONFIG_SCHEMA = {
            "Lớn → ít đỉnh, dễ chỉnh sửa nhưng kém sát viền; nhỏ → nhiều đỉnh, sát viền hơn."),
     ],
     "wisdom": [
-        dict(key="jaws", label="Hàm phân tích", type="select", default="both",
+        dict(key="jaws", label="Hàm phân tích", type="select", default="lower",
              options=[{"value": "both", "label": "Cả hai hàm (18, 28, 38, 48)"},
                       {"value": "lower", "label": "Chỉ hàm dưới (38, 48)"},
                       {"value": "upper", "label": "Chỉ hàm trên (18, 28)"}],
-             hint="Chọn răng khôn cần phân tích. Phân loại Pell & Gregory chủ yếu dùng cho hàm dưới; hàm trên dùng tương tự theo Archer."),
+             hint="Chọn răng khôn cần phân tích. Mặc định chỉ hàm dưới (38, 48) — giống nhãn bác sĩ trong final_data "
+                  "(chỉ khoanh răng khôn hàm dưới lệch ngầm) nên chỉ hàm dưới đã được đánh giá độ chính xác. "
+                  "Phân loại Pell & Gregory dùng cho hàm dưới; hàm trên (Archer) chưa được kiểm chứng."),
         _n("angle_thr", "Ngưỡng góc ngầm/lệch (°)", 0, 90, 1, WISDOM_PARAMS["angle_thr"],
            "Góc Winter = góc giữa trục răng khôn và trục răng 7 cùng bên (dương = nghiêng về phía gần). "
            "|góc| > ngưỡng → kết luận NGẦM/LỆCH. Mặc định đã hiệu chỉnh trên dữ liệu DENTEX."),
@@ -183,7 +185,7 @@ def analyze_wisdom(teeth, width, height, p=None, cej=None):
     for c in cej or []:
         if int(c["fdi"]) % 10 == 7 and c.get("tooth_id") == ids.get(int(c["fdi"])):
             cej_pts[int(c["fdi"])] = [c[s] for s in ("mesial", "distal") if c.get(s)]
-    for r in wisdom_geom.analyze_teeth(masks, params, WISDOM_JAWS[(p or {}).get("jaws", "both")], cej_pts):
+    for r in wisdom_geom.analyze_teeth(masks, params, WISDOM_JAWS[(p or {}).get("jaws", "lower")], cej_pts):
         r["fdi"] = str(r["fdi"])
         r["tooth_id"] = ids.get(int(r["fdi"]))
         r["text"] = wisdom_geom.describe({**r, "fdi": int(r["fdi"])})
